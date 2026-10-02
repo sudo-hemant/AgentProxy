@@ -1,0 +1,10 @@
+node_modules/
+.DS_Store
+
+# Spike: generated locally on each machine
+# - self-signed TLS key for the fake external API
+spike/certs/
+# - local pairing token written by server.js
+spike/extension/config.js
+# - test run outputs
+spike/results/
