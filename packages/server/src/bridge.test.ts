@@ -66,6 +66,27 @@ describe("startBridge", () => {
     });
   });
 
+  it("syncs rules with a connected extension", async () => {
+    const ws = new WebSocket(`ws://127.0.0.1:${bridge.port}/?token=${TOKEN}`, {
+      origin: EXTENSION_ORIGIN,
+    });
+    const received: unknown[] = [];
+    ws.on("message", (data) => {
+      const message = JSON.parse(String(data));
+      received.push(message);
+      ws.send(JSON.stringify({ type: "applied", version: message.version }));
+    });
+    await new Promise((resolve) => ws.once("message", resolve)); // the rules sent on connect
+
+    const result = await bridge.setRules([]);
+    expect(result).toEqual({ version: 1, applied: true });
+    expect(received).toEqual([
+      { type: "rules", version: 0, rules: [] },
+      { type: "rules", version: 1, rules: [] },
+    ]);
+    ws.close();
+  });
+
   it("answers plain HTTP requests with 404", async () => {
     const response = await fetch(`http://127.0.0.1:${bridge.port}/`);
     expect(response.status).toBe(404);

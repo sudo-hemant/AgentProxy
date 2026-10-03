@@ -2,7 +2,9 @@ import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { Duplex } from "node:stream";
+import type { MockRule } from "@agentproxy/shared";
 import { WebSocketServer } from "ws";
+import { createRuleSync, type SetRulesResult } from "./rule-sync.js";
 
 export interface BridgeOptions {
   /** Port on 127.0.0.1. 0 picks a free one (tests). */
@@ -11,11 +13,16 @@ export interface BridgeOptions {
   token: string;
   /** The only Origin allowed to connect: `chrome-extension://<our extension id>`. */
   extensionOrigin: string;
+  /** How long `setRules` waits for the extension to confirm. */
+  ackTimeoutMs?: number;
 }
 
 export interface Bridge {
   /** The port actually listened on. */
   port: number;
+  /** Replaces the rules, sends them to the extension, and waits for it to confirm them. */
+  setRules(rules: MockRule[]): Promise<SetRulesResult>;
+  getRules(): MockRule[];
   close(): Promise<void>;
 }
 
@@ -28,6 +35,8 @@ export function startBridge(options: BridgeOptions): Promise<Bridge> {
     res.writeHead(404).end();
   });
   const wss = new WebSocketServer({ noServer: true });
+  const sync = createRuleSync({ ackTimeoutMs: options.ackTimeoutMs });
+  wss.on("connection", (ws) => sync.attach(ws));
 
   return new Promise((resolve, reject) => {
     server.once("error", reject);
@@ -41,6 +50,8 @@ export function startBridge(options: BridgeOptions): Promise<Bridge> {
 
       resolve({
         port,
+        setRules: sync.setRules,
+        getRules: sync.getRules,
         close: () =>
           new Promise((done) => {
             for (const client of wss.clients) client.terminate();
