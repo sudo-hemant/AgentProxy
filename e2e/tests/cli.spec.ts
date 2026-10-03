@@ -21,6 +21,10 @@ test("the agentproxy command serves the tools over stdio", async () => {
     } as Record<string, string>,
     stderr: "pipe",
   });
+  let stderr = "";
+  transport.stderr?.on("data", (chunk) => {
+    stderr += chunk;
+  });
   const client = new Client({ name: "e2e", version: "1" });
   await client.connect(transport);
 
@@ -42,5 +46,9 @@ test("the agentproxy command serves the tools over stdio", async () => {
   const started = Date.now();
   await client.close();
   expect(Date.now() - started).toBeLessThan(1500);
+  // Only the start-up line: no errors or warnings, on the way in or out.
+  expect(stderr.trim().split("\n")).toEqual([
+    expect.stringMatching(/^agentproxy .*: waiting for the extension on 127\.0\.0\.1:\d+$/),
+  ]);
   await rm(extensionDir, { recursive: true, force: true });
 });

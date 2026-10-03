@@ -65,12 +65,14 @@ async function serve(): Promise<void> {
   }
 
   // The agent closes our stdin when it's done; stop, so the open port doesn't keep us running.
-  const shutdown = async () => {
+  // Closing the proxy closes the transport too, so this must only ever run once.
+  let stopping = false;
+  process.stdin.once("end", async () => {
+    if (stopping) return;
+    stopping = true;
     await proxy.close();
     process.exit(0);
-  };
-  transport.onclose = shutdown;
-  process.stdin.once("end", shutdown);
+  });
 }
 
 /** Runs a command, collecting its output. A command that isn't installed gives no exit code. */
