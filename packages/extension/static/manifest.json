@@ -3,8 +3,11 @@
   "name": "AgentProxy",
   "version": "0.0.0",
   "description": "Lets your AI coding agent mock API responses in localhost pages.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAjjZZKSixp+cpx25p1ATT8j3GeBMdWIiqJfTVbqYdBVRvdGAnf/gKy9wymXHCgAAGT3h2Trh9wnSj3hjBjWQLf7Al0Mte++o8fZSJZdaNFUaXKx+u3ufNbOzfT49tcCdQeg0e6GXoUkUo0IMaRzTQ5AnHC8AETjJb4I9jF+ODxHnRfgkZWWXfc5nTiwyEmRz0ij4Q3dQTcys1XtrDo/7oFpWnYbWv4vEL2DWThz5YtkYfDstJSEvcCABUc3p4eJWKU1afD9cnZ15sy8NRJXRXW8YD6DMV4OfcG9G0+XpzNTpoQN5ewon+tiqTthRyZA3klR5ImuL+dOKruPx8iB9G3wIDAQAB",
   "minimum_chrome_version": "120",
-  "background": { "service_worker": "background.js" },
+  "background": {
+    "service_worker": "background.js"
+  },
   "permissions": ["storage"],
   "host_permissions": ["http://localhost/*", "http://127.0.0.1/*"],
   "content_scripts": [
