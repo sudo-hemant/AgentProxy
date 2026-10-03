@@ -1,4 +1,4 @@
-import { DEFAULT_PORT, type ExtensionConfig } from "@agentproxy/shared";
+import { type ExtensionConfig, parseExtensionConfig } from "@agentproxy/shared";
 
 /**
  * Reads how to reach the server from `config.json` in the extension's folder. Returns undefined
@@ -16,14 +16,5 @@ export async function loadConfig(
   } catch {
     return undefined; // missing file or not JSON
   }
-  return parseConfig(data);
-}
-
-function parseConfig(data: unknown): ExtensionConfig | undefined {
-  if (typeof data !== "object" || data === null) return undefined;
-  const { port = DEFAULT_PORT, token } = data as { port?: unknown; token?: unknown };
-  if (typeof token !== "string" || token === "") return undefined;
-  if (!Number.isInteger(port) || (port as number) < 1 || (port as number) > 65_535)
-    return undefined;
-  return { port: port as number, token };
+  return parseExtensionConfig(data);
 }
