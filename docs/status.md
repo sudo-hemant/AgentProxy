@@ -9,8 +9,8 @@ Progress through the MVP steps in [plan.md](plan.md), and the decisions taken in
 | 3. Extension core | ✅ Done |
 | 4. Local bridge | ✅ Done |
 | 5. MCP tools | ✅ Done |
-| 6. Basic setup | Next |
-| 7. End-to-end tests | Not started |
+| 6. Basic setup | ✅ Done |
+| 7. End-to-end tests | Next |
 | 8. Real-agent trial | Not started |
 
 ## Step 1: Project setup
@@ -115,7 +115,6 @@ Each piece's logic sits in a module that takes its browser APIs as arguments, so
   - `pnpm test:e2e` builds everything first.
 
 **Open items for later steps:**
-- **Step 6:** the server should keep its pairing token across restarts, as the spike did. The extension reads `config.json` only when its service worker starts, so a new token means reloading the extension.
 - **Step 8:** check, in a normal Chrome, that the 20 s pings keep the service worker and the connection alive when idle. Automation keeps the worker awake, so the tests can't show this.
 - **Workers:** requests made from web workers and service workers aren't covered, as noted in the overview.
 - **Dependency warning:** Vitest asks for `@types/node` 22 or later as an optional peer, while the repo uses 20 to match the Node 20 minimum. It's a harmless install warning.
@@ -216,3 +215,46 @@ Browser tests (`e2e/tests/agent-tools.spec.ts`) drive the real extension through
   - `AGENTPROXY_PORT` defaults to 47821, and 0 picks a free port.
   - `AGENTPROXY_TOKEN` is random for each run if unset. Step 6 keeps it across restarts and writes it to the extension's `config.json`.
 - **Package exports:** the server package exports `agentproxy/bridge` and `agentproxy/main` for the e2e fixtures.
+
+## Step 6: Basic setup
+
+**Result:** from a fresh clone, `pnpm install` and `pnpm run setup` build everything, pair the extension and register the server with Claude Code. After that you load `packages/extension/dist` in Chrome, and the agent can use the tools. The README describes these steps.
+
+I followed the README from a fresh clone of the repo, with two stand-ins:
+- `--no-register`, so the real Claude Code config wasn't touched;
+- Playwright's Chromium, loading the clone's `dist` folder as-is, instead of your Chrome.
+
+An MCP client then started the clone's server exactly as Claude Code would. The extension connected, a `GET /api/orders` mock reached the page, `get_matches` reported it, and `clear_mocks` brought back the real API. The `claude mcp add` arguments were checked against the real CLI at project scope in a scratch folder.
+
+**How the pieces fit:**
+- **`server/src/pairing.ts`:** reads and writes the extension's `config.json`.
+- **`server/src/setup.ts`:** `agentproxy setup`, which checks the build, pairs, registers and prints next steps.
+- **`server/src/index.ts`:** chooses between serving MCP (no arguments) and `setup`.
+- **`server/bin/agentproxy.js`:** a committed launcher for the built command.
+- **`extension/src/background/connection.ts`:** now loads the config before every connection attempt.
+
+**Decisions:**
+- **The pairing lives in one place:** the extension's `config.json` (`{ port, token }`).
+  - The server reuses the token in it on every start, so restarting the server never breaks the pairing.
+  - The token comes from `AGENTPROXY_TOKEN` if set, otherwise from `config.json`, otherwise a new random one.
+  - The server writes the actual port and the token once its bridge listens, and only when they changed.
+  - Nothing is written outside the repo.
+- **Extension folder:** the built extension next to the server in the repo, or `AGENTPROXY_EXTENSION_DIR`. If it can't be written, for example because it isn't built, the server still runs and `status` says what to do.
+- **The extension re-reads `config.json` before every connection attempt,** and keeps looking every second while it's missing. Chrome serves an unpacked extension's files from disk, so an extension loaded before pairing, or after a port or token change, connects without a reload. This was checked in Chromium and is covered by a browser test.
+- **`agentproxy setup`:**
+  - checks the extension is built;
+  - pairs it on the configured port, refusing port 0;
+  - registers the server with Claude Code: `claude mcp add agentproxy --scope user [-e AGENTPROXY_PORT=…] -- <node> <server>`.
+- **Registration details:**
+  - It uses absolute paths to `node` and the server, so it doesn't depend on the agent's `PATH`.
+  - An earlier registration is removed first, so setup can be run again.
+  - The scope can be changed with `--scope local|project`.
+  - Without the `claude` command, setup prints an `mcpServers` entry for other MCP clients.
+  - `--no-register` only pairs.
+- **`pnpm run setup`** builds, then runs `agentproxy setup`, passing its arguments through.
+- **Shutdown:** the server stops when stdin ends, once. The CLI test fails on any error output from the command.
+
+**Problems found while following the README, and fixed:**
+- **Install warning:** a fresh `pnpm install` warned that it couldn't create the `agentproxy` bin, because the bin pointed at `dist/`, which doesn't exist before the first build. A committed launcher, `bin/agentproxy.js`, fixes it.
+- **Crash on disconnect:** the server overflowed the stack when the agent disconnected. Overriding the transport's `onclose` replaced the MCP SDK's handler, and closing called shutdown again.
+- **Registration order:** `claude mcp add` put `-e` before the server name. `-e` takes several values, so it could swallow the name.
