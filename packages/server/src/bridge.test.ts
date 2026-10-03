@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 import { type Bridge, startBridge } from "./bridge.js";
 
@@ -85,6 +85,17 @@ describe("startBridge", () => {
       { type: "rules", version: 1, rules: [] },
     ]);
     ws.close();
+  });
+
+  it("knows whether the extension is connected", async () => {
+    expect(bridge.isConnected()).toBe(false);
+    const ws = new WebSocket(`ws://127.0.0.1:${bridge.port}/?token=${TOKEN}`, {
+      origin: EXTENSION_ORIGIN,
+    });
+    await new Promise((resolve) => ws.once("open", resolve));
+    expect(bridge.isConnected()).toBe(true);
+    ws.close();
+    await vi.waitFor(() => expect(bridge.isConnected()).toBe(false));
   });
 
   it("answers plain HTTP requests with 404", async () => {
