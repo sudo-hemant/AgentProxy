@@ -2,4 +2,5 @@
 export const PROTOCOL_VERSION = 1;
 
 export * from "./matcher.js";
+export * from "./messages.js";
 export type * from "./rule.js";
