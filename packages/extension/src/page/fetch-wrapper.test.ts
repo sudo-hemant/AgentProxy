@@ -17,7 +17,12 @@ function setup(rules: MockRule[] | undefined = [ordersRule]) {
   const store = createRuleStore();
   if (rules) store.setRules(rules);
   const reports: MatchReport[] = [];
-  const mockFetch = createMockFetch(realFetch, store, (m) => reports.push(m), BASE);
+  const mockFetch = createMockFetch(
+    realFetch,
+    store,
+    (m) => reports.push(m),
+    () => BASE,
+  );
   return { realFetch, store, reports, mockFetch };
 }
 

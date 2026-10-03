@@ -31,7 +31,12 @@ beforeEach(() => {
   XMLHttpRequest.prototype.abort = realAbort;
   store = createRuleStore();
   reports = [];
-  uninstall = installXhrWrapper(XMLHttpRequest, store, (m) => reports.push(m), BASE);
+  uninstall = installXhrWrapper(
+    XMLHttpRequest,
+    store,
+    (m) => reports.push(m),
+    () => BASE,
+  );
 });
 
 afterEach(() => {

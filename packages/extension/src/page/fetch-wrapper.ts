@@ -7,17 +7,18 @@ export type ReportMatch = (match: MatchReport) => void;
 /**
  * A replacement for `fetch` that answers matching requests with their mock. Every other request
  * goes to `realFetch` with the caller's original arguments, so its headers, cookies and body are
- * untouched. `baseUrl` resolves relative request URLs, as the page's own fetch would.
+ * untouched. `getBaseUrl` gives the page's current base URL, to resolve relative request URLs
+ * as the page's own fetch would.
  */
 export function createMockFetch(
   realFetch: typeof fetch,
   store: RuleStore,
   reportMatch: ReportMatch,
-  baseUrl: string,
+  getBaseUrl: () => string,
 ): typeof fetch {
   return async (input, init) => {
     await store.ready;
-    const request = describeRequest(input, init, baseUrl);
+    const request = describeRequest(input, init, getBaseUrl());
     const rule = request && store.find(request);
     if (!request || !rule) return realFetch(input, init);
 

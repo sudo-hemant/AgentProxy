@@ -18,7 +18,7 @@ export function installXhrWrapper(
   Xhr: typeof XMLHttpRequest,
   store: RuleStore,
   reportMatch: ReportMatch,
-  baseUrl: string,
+  getBaseUrl: () => string,
 ): () => void {
   const proto = Xhr.prototype;
   const realOpen = proto.open;
@@ -41,7 +41,7 @@ export function installXhrWrapper(
     try {
       opened.set(this, {
         method: method.toUpperCase(),
-        url: new URL(String(url), baseUrl).href,
+        url: new URL(String(url), getBaseUrl()).href,
         // `open(method, url)` is async; with a third argument, that argument decides.
         async: rest.length === 0 || Boolean(rest[0]),
       });
