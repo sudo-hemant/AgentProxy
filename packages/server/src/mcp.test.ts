@@ -52,10 +52,10 @@ async function connect(browser = fakeBrowser().browser) {
 }
 
 describe("MCP server", () => {
-  it("offers set_mock and list_mocks", async () => {
+  it("offers its tools", async () => {
     const { client } = await connect();
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name)).toEqual(["set_mock", "list_mocks"]);
+    expect(tools.map((t) => t.name)).toEqual(["set_mock", "list_mocks", "clear_mocks"]);
     const setMock = tools.find((t) => t.name === "set_mock");
     expect(setMock?.inputSchema.required).toEqual(["url"]);
   });
@@ -186,6 +186,37 @@ describe("MCP server", () => {
           },
         ],
       });
+    });
+  });
+
+  describe("clear_mocks", () => {
+    it("removes every mock and tells the browser", async () => {
+      const { browser, sent } = fakeBrowser();
+      const { call } = await connect(browser);
+      await call("set_mock", { url: "*/a" });
+      await call("set_mock", { url: "*/b" });
+      const { isError, data } = await call("clear_mocks");
+      expect(isError).toBe(false);
+      expect(data).toMatchObject({ cleared: ["mock-1", "mock-2"], not_found: [], applied: true });
+      expect(sent.at(-1)).toEqual([]);
+      expect((await call("list_mocks")).data.mocks).toEqual([]);
+    });
+
+    it("removes only the given ids, and says which it didn't find", async () => {
+      const { browser, sent } = fakeBrowser();
+      const { call } = await connect(browser);
+      await call("set_mock", { id: "a", url: "*/a" });
+      await call("set_mock", { id: "b", url: "*/b" });
+      const { data } = await call("clear_mocks", { ids: ["a", "nope"] });
+      expect(data).toMatchObject({ cleared: ["a"], not_found: ["nope"] });
+      expect(sent.at(-1)?.map((r) => r.id)).toEqual(["b"]);
+    });
+
+    it("notes when no browser is connected", async () => {
+      const { call } = await connect(fakeBrowser({ connected: false, applied: false }).browser);
+      const { data } = await call("clear_mocks");
+      expect(data.applied).toBe(false);
+      expect(data.note).toMatch(/No browser is connected/);
     });
   });
 });

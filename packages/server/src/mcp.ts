@@ -1,6 +1,7 @@
 import type { MockRule } from "@agentproxy/shared";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { z } from "zod";
 import type { MatchLog } from "./match-log.js";
 import { mockInputShape, toMockRule } from "./mock-input.js";
 import type { MockStore } from "./mock-store.js";
@@ -69,6 +70,26 @@ export function createMcpServer({
       annotations: { readOnlyHint: true },
     },
     async () => reply({ mocks: store.list().map((rule) => describeRule(rule, now())) }),
+  );
+
+  server.registerTool(
+    "clear_mocks",
+    {
+      title: "Clear mocks",
+      description:
+        "Remove mocks so the affected requests reach the real API again. Removes all mocks, " +
+        "or only the given ids.",
+      inputSchema: {
+        ids: z
+          .array(z.string())
+          .optional()
+          .describe("Ids of the mocks to remove. Removes every mock if left out."),
+      },
+    },
+    async ({ ids }) => {
+      const { cleared, notFound } = store.clear(ids);
+      return reply({ cleared, not_found: notFound, ...(await sync()) });
+    },
   );
 
   return server;
