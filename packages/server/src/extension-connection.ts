@@ -1,4 +1,9 @@
-import { type MatchReport, PROTOCOL_VERSION, parseExtensionToServer } from "@agentproxy/shared";
+import {
+  CLOSE_PROTOCOL_MISMATCH,
+  type MatchReport,
+  PROTOCOL_VERSION,
+  parseExtensionToServer,
+} from "@agentproxy/shared";
 import type { ExtensionSocket } from "./rule-sync.js";
 
 /** What the connection tracker needs from a `ws` WebSocket, beyond what the rule sync uses. */
@@ -20,8 +25,6 @@ export interface ConnectionTracker {
 }
 
 export const DEFAULT_SILENCE_TIMEOUT_MS = 60_000;
-/** Close code sent when the extension speaks another protocol version. */
-export const CLOSE_PROTOCOL_MISMATCH = 4000;
 
 export function createConnectionTracker({
   silenceTimeoutMs = DEFAULT_SILENCE_TIMEOUT_MS,

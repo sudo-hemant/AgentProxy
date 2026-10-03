@@ -4,6 +4,9 @@ import type { MockRule } from "./rule.js";
 // Messages on the WebSocket between the server and the extension's background. Each message is
 // one JSON object. Both sides check what they receive, since it crosses a process boundary.
 
+/** Close code the server uses when the extension speaks another protocol version. */
+export const CLOSE_PROTOCOL_MISMATCH = 4000;
+
 /** Server → extension. */
 export type ServerToExtension =
   /** The full rule list. `version` grows with every change, so the extension can confirm it. */

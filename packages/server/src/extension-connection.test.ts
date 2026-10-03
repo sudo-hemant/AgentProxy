@@ -1,11 +1,7 @@
 import { EventEmitter } from "node:events";
-import { type MatchReport, PROTOCOL_VERSION } from "@agentproxy/shared";
+import { CLOSE_PROTOCOL_MISMATCH, type MatchReport, PROTOCOL_VERSION } from "@agentproxy/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  CLOSE_PROTOCOL_MISMATCH,
-  createConnectionTracker,
-  type TrackedSocket,
-} from "./extension-connection.js";
+import { createConnectionTracker, type TrackedSocket } from "./extension-connection.js";
 
 /** A fake extension connection. close and terminate emit "close", as a real socket would. */
 function fakeSocket() {
