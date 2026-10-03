@@ -153,6 +153,52 @@ describe("installXhrWrapper", () => {
     });
   });
 
+  describe("a synchronous request", () => {
+    function openSync(url: string) {
+      const xhr = new XMLHttpRequest();
+      xhr.open("GET", url, false);
+      return xhr;
+    }
+
+    it("is mocked before send returns when the rules are already here", () => {
+      store.setRules([ordersRule]);
+      const xhr = openSync("/api/orders");
+      const events: string[] = [];
+      xhr.addEventListener("readystatechange", () => events.push("readystatechange"));
+      xhr.addEventListener("load", () => events.push("load"));
+      xhr.addEventListener("loadend", () => events.push("loadend"));
+      xhr.send();
+      expect(xhr.status).toBe(500);
+      expect(xhr.responseText).toBe('{"error":"boom"}');
+      expect(events).toEqual(["readystatechange", "load", "loadend"]);
+      expect(realSend).not.toHaveBeenCalled();
+      expect(reports).toHaveLength(1);
+    });
+
+    it("goes out unmocked, without waiting, when the rules haven't arrived", () => {
+      const xhr = openSync("/api/orders");
+      xhr.send();
+      expect(realSend).toHaveBeenCalledTimes(1);
+      expect(reports).toEqual([]);
+    });
+
+    it("goes out through the real send, without waiting, when nothing matches", () => {
+      store.setRules([ordersRule]);
+      const xhr = openSync("/api/users");
+      xhr.send();
+      expect(realSend).toHaveBeenCalledTimes(1);
+    });
+
+    it("is only synchronous when open's third argument is false", async () => {
+      store.setRules([ordersRule]);
+      const xhr = new XMLHttpRequest();
+      xhr.open("GET", "/api/orders", true);
+      xhr.send();
+      expect(xhr.status).toBe(0); // not answered yet
+      await vi.waitFor(() => expect(xhr.status).toBe(500));
+    });
+  });
+
   it("restores the real open and send when uninstalled", () => {
     uninstall();
     expect(XMLHttpRequest.prototype.send).toBe(realSend);

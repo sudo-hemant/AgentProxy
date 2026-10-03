@@ -7,6 +7,7 @@ import type { RuleStore } from "./rule-store.js";
 interface OpenedRequest {
   method: string;
   url: string;
+  async: boolean;
 }
 
 /**
@@ -31,7 +32,12 @@ export function installXhrWrapper(
     ...rest: unknown[]
   ) {
     try {
-      opened.set(this, { method: method.toUpperCase(), url: new URL(String(url), baseUrl).href });
+      opened.set(this, {
+        method: method.toUpperCase(),
+        url: new URL(String(url), baseUrl).href,
+        // `open(method, url)` is async; with a third argument, that argument decides.
+        async: rest.length === 0 || Boolean(rest[0]),
+      });
     } catch {
       opened.delete(this); // an invalid URL: the real open throws, as it should
     }
@@ -41,12 +47,16 @@ export function installXhrWrapper(
   proto.send = function (this: XMLHttpRequest, body?: Document | XMLHttpRequestBodyInit | null) {
     const request = opened.get(this);
     if (!request) return realSend.call(this, body);
-    store.ready.then(() => {
+    const answer = () => {
       const rule = store.find(request);
       if (!rule) return realSend.call(this, body);
       reportMatch({ ruleId: rule.id, method: request.method, url: request.url, transport: "xhr" });
-      respondWithMock(this, rule, request.url);
-    });
+      respondWithMock(this, rule, request.url, request.async);
+    };
+    // A synchronous request must finish before send returns, so it can't wait for the rules:
+    // it is mocked only if they have already arrived.
+    if (!request.async) return store.hasRules() ? answer() : realSend.call(this, body);
+    store.ready.then(answer);
   };
 
   return () => {
@@ -56,7 +66,7 @@ export function installXhrWrapper(
 }
 
 /** Makes the XHR look exactly as if the mocked response had come from the network. */
-function respondWithMock(xhr: XMLHttpRequest, rule: MockRule, url: string): void {
+function respondWithMock(xhr: XMLHttpRequest, rule: MockRule, url: string, async: boolean): void {
   const { status, headers, body } = buildMockResponse(rule.response);
   const text = body ?? "";
   const define = (name: string, value: unknown) =>
@@ -74,8 +84,7 @@ function respondWithMock(xhr: XMLHttpRequest, rule: MockRule, url: string): void
       .map(([name, value]) => `${name}: ${value}\r\n`)
       .join("");
 
-  // A real response arrives asynchronously, after send has returned.
-  setTimeout(() => {
+  const fireEvents = () => {
     xhr.dispatchEvent(new Event("readystatechange"));
     for (const type of ["load", "loadend"]) {
       xhr.dispatchEvent(
@@ -86,7 +95,10 @@ function respondWithMock(xhr: XMLHttpRequest, rule: MockRule, url: string): void
         }),
       );
     }
-  }, 0);
+  };
+  // An async response arrives after send has returned; a sync one, before it returns.
+  if (async) setTimeout(fireEvents, 0);
+  else fireEvents();
 }
 
 /** The value of `xhr.response` for the request's `responseType`. */
