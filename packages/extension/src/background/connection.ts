@@ -19,7 +19,11 @@ export interface SocketLike {
 }
 
 export interface ServerConnectionOptions {
-  config: ExtensionConfig;
+  /**
+   * Reads how to reach the server. Called before every connection attempt, so pairing written
+   * after the extension loaded, or a new port or token, is picked up without a reload.
+   */
+  loadConfig(): Promise<ExtensionConfig | undefined>;
   createSocket(url: string): SocketLike;
   /** Stores a rule list the server sent; the connection confirms it once this resolves. */
   applyRules(rules: MockRule[]): Promise<void>;
@@ -41,14 +45,15 @@ const OPEN = 1;
 const CONNECTING = 0;
 
 export function createServerConnection({
-  config,
+  loadConfig,
   createSocket,
   applyRules,
   reconnectDelayMs = DEFAULT_RECONNECT_DELAY_MS,
   pingIntervalMs = DEFAULT_PING_INTERVAL_MS,
 }: ServerConnectionOptions): ServerConnection {
-  const url = `ws://127.0.0.1:${config.port}/?token=${encodeURIComponent(config.token)}`;
   let socket: SocketLike | undefined;
+  /** True while reading the config, so overlapping start() calls don't open two sockets. */
+  let loading = false;
   let pingTimer: ReturnType<typeof setInterval> | undefined;
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   // Rule lists are applied one after another, so confirmations go out in the order sent.
@@ -58,10 +63,23 @@ export function createServerConnection({
     if (socket?.readyState === OPEN) socket.send(JSON.stringify(message));
   };
 
-  const connect = () => {
+  const connect = async () => {
+    if (loading) return;
     if (socket && (socket.readyState === OPEN || socket.readyState === CONNECTING)) return;
     clearTimeout(reconnectTimer);
-    const current = createSocket(url);
+
+    loading = true;
+    const config = await loadConfig().catch(() => undefined);
+    loading = false;
+    if (!config) {
+      // Not paired yet: look again shortly, e.g. once `agentproxy setup` has written it.
+      reconnectTimer = setTimeout(connect, reconnectDelayMs);
+      return;
+    }
+
+    const current = createSocket(
+      `ws://127.0.0.1:${config.port}/?token=${encodeURIComponent(config.token)}`,
+    );
     socket = current;
 
     current.onopen = () => {
@@ -87,7 +105,7 @@ export function createServerConnection({
   };
 
   return {
-    start: connect,
+    start: () => void connect(),
     sendMatch: (match) => send({ type: "match", match }),
   };
 }

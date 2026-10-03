@@ -1,7 +1,7 @@
 // MVP step 4: the extension connects to the server, confirms the rules it receives, keeps
 // mocking while the server is gone, and reconnects and resyncs when the server comes back.
 import type { MockRule } from "@agentproxy/shared";
-import { expect, test } from "../fixtures/extension.js";
+import { expect, launchWithExtension, test } from "../fixtures/extension.js";
 
 const ordersRule = (api: string, body: unknown): MockRule => ({
   id: "orders",
@@ -46,4 +46,23 @@ test("keeps mocking while the server is down, and resyncs when it restarts", asy
   await server.bridge.setRules([ordersRule(api.url, { from: "restarted server" })]);
   await expect.poll(() => server.bridge.isConnected(), { timeout: 10_000 }).toBe(true);
   await expect.poll(() => fetchOrders(page)).toEqual({ from: "restarted server" });
+});
+
+test("an extension loaded before pairing connects once config.json appears", async ({
+  server,
+  api,
+}) => {
+  const browser = await launchWithExtension(undefined);
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    expect(server.bridge.isConnected()).toBe(false);
+
+    await browser.pair(server.bridge.port); // what `agentproxy` does when it starts
+    await expect.poll(() => server.bridge.isConnected(), { timeout: 10_000 }).toBe(true);
+    expect(await server.bridge.setRules([ordersRule(api.url, {})])).toMatchObject({
+      applied: true,
+    });
+  } finally {
+    await browser.close();
+  }
 });

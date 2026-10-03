@@ -1,4 +1,9 @@
-import { type ExtensionToServer, type MockRule, PROTOCOL_VERSION } from "@agentproxy/shared";
+import {
+  type ExtensionConfig,
+  type ExtensionToServer,
+  type MockRule,
+  PROTOCOL_VERSION,
+} from "@agentproxy/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createServerConnection, type SocketLike } from "./connection.js";
 
@@ -38,8 +43,10 @@ class FakeSocket implements SocketLike {
 
 function setup(applyRules = vi.fn(async (_rules: MockRule[]) => {})) {
   const sockets: FakeSocket[] = [];
+  let config: ExtensionConfig | undefined = { port: 4000, token: "t o/k" };
+  const loadConfig = vi.fn(async () => config);
   const connection = createServerConnection({
-    config: { port: 4000, token: "t o/k" },
+    loadConfig,
     createSocket: (url) => {
       const socket = new FakeSocket(url);
       sockets.push(socket);
@@ -49,7 +56,19 @@ function setup(applyRules = vi.fn(async (_rules: MockRule[]) => {})) {
     reconnectDelayMs: 1000,
     pingIntervalMs: 20_000,
   });
-  return { connection, sockets, applyRules, latest: () => sockets.at(-1) as FakeSocket };
+  return {
+    connection,
+    sockets,
+    applyRules,
+    loadConfig,
+    setConfig: (next: ExtensionConfig | undefined) => (config = next),
+    latest: () => sockets.at(-1) as FakeSocket,
+    /** Starts connecting and lets the config be read. */
+    start: async () => {
+      connection.start();
+      await vi.advanceTimersByTimeAsync(0);
+    },
+  };
 }
 
 beforeEach(() => {
@@ -60,32 +79,32 @@ afterEach(() => {
 });
 
 describe("createServerConnection", () => {
-  it("connects to the server's port on loopback with the encoded token", () => {
-    const { connection, latest } = setup();
-    connection.start();
+  it("connects to the server's port on loopback with the encoded token", async () => {
+    const { start, latest } = setup();
+    await start();
     expect(latest().url).toBe("ws://127.0.0.1:4000/?token=t%20o%2Fk");
   });
 
-  it("says hello with the protocol version once open", () => {
-    const { connection, latest } = setup();
-    connection.start();
+  it("says hello with the protocol version once open", async () => {
+    const { start, latest } = setup();
+    await start();
     latest().open();
     expect(latest().sent).toEqual([{ type: "hello", protocolVersion: PROTOCOL_VERSION }]);
   });
 
-  it("doesn't open a second socket while connecting or connected", () => {
-    const { connection, sockets } = setup();
-    connection.start();
-    connection.start();
+  it("doesn't open a second socket while connecting or connected", async () => {
+    const { start, sockets } = setup();
+    await start();
+    await start();
     sockets[0]?.open();
-    connection.start();
+    await start();
     expect(sockets).toHaveLength(1);
   });
 
   describe("rules", () => {
     it("applies each rule list, then confirms its version", async () => {
-      const { connection, latest, applyRules } = setup();
-      connection.start();
+      const { start, latest, applyRules } = setup();
+      await start();
       latest().open();
       latest().serverSays({ type: "rules", version: 3, rules: [rule("a")] });
       await vi.waitFor(() => expect(latest().sent).toContainEqual({ type: "applied", version: 3 }));
@@ -98,8 +117,8 @@ describe("createServerConnection", () => {
         .fn<(rules: MockRule[]) => Promise<void>>()
         .mockImplementationOnce(() => new Promise((resolve) => (finishFirst = resolve)))
         .mockImplementation(async () => {});
-      const { connection, latest } = setup(applyRules);
-      connection.start();
+      const { start, latest } = setup(applyRules);
+      await start();
       latest().open();
       latest().serverSays({ type: "rules", version: 1, rules: [] });
       latest().serverSays({ type: "rules", version: 2, rules: [] });
@@ -119,8 +138,8 @@ describe("createServerConnection", () => {
         .fn<(rules: MockRule[]) => Promise<void>>()
         .mockRejectedValueOnce(new Error("storage full"))
         .mockResolvedValue(undefined);
-      const { connection, latest } = setup(applyRules);
-      connection.start();
+      const { start, latest } = setup(applyRules);
+      await start();
       latest().open();
       latest().serverSays({ type: "rules", version: 1, rules: [] });
       latest().serverSays({ type: "rules", version: 2, rules: [] });
@@ -132,8 +151,8 @@ describe("createServerConnection", () => {
     });
 
     it("ignores messages that aren't valid", async () => {
-      const { connection, latest, applyRules } = setup();
-      connection.start();
+      const { start, latest, applyRules } = setup();
+      await start();
       latest().open();
       latest().serverSays({ type: "rules", version: "3", rules: [] });
       await vi.advanceTimersByTimeAsync(0);
@@ -144,17 +163,17 @@ describe("createServerConnection", () => {
   describe("match reports", () => {
     const match = { ruleId: "a", method: "GET", url: "http://x/", transport: "fetch" } as const;
 
-    it("are sent while connected", () => {
-      const { connection, latest } = setup();
-      connection.start();
+    it("are sent while connected", async () => {
+      const { connection, start, latest } = setup();
+      await start();
       latest().open();
       connection.sendMatch(match);
       expect(latest().sent).toContainEqual({ type: "match", match });
     });
 
-    it("are dropped while not connected", () => {
-      const { connection, latest } = setup();
-      connection.start();
+    it("are dropped while not connected", async () => {
+      const { connection, start, latest } = setup();
+      await start();
       connection.sendMatch(match); // still connecting
       latest().open();
       expect(latest().sent).toEqual([{ type: "hello", protocolVersion: PROTOCOL_VERSION }]);
@@ -162,59 +181,100 @@ describe("createServerConnection", () => {
   });
 
   describe("keepalive", () => {
-    it("pings every interval while open, and stops once closed", () => {
-      const { connection, latest } = setup();
-      connection.start();
+    it("pings every interval while open, and stops once closed", async () => {
+      const { start, latest } = setup();
+      await start();
       latest().open();
-      vi.advanceTimersByTime(40_000);
+      await vi.advanceTimersByTimeAsync(40_000);
       const socket = latest();
       expect(socket.sent.filter((m) => m.type === "ping")).toHaveLength(2);
       socket.serverCloses();
-      vi.advanceTimersByTime(40_000);
+      await vi.advanceTimersByTimeAsync(40_000);
       expect(socket.sent.filter((m) => m.type === "ping")).toHaveLength(2);
     });
   });
 
   describe("reconnecting", () => {
-    it("reconnects after the delay when the connection drops", () => {
-      const { connection, sockets, latest } = setup();
-      connection.start();
+    it("reconnects after the delay when the connection drops", async () => {
+      const { start, sockets, latest } = setup();
+      await start();
       latest().open();
       latest().serverCloses();
-      vi.advanceTimersByTime(999);
+      await vi.advanceTimersByTimeAsync(999);
       expect(sockets).toHaveLength(1);
-      vi.advanceTimersByTime(1);
+      await vi.advanceTimersByTimeAsync(1);
       expect(sockets).toHaveLength(2);
     });
 
-    it("keeps trying while the server is down", () => {
-      const { connection, sockets, latest } = setup();
-      connection.start();
+    it("keeps trying while the server is down", async () => {
+      const { start, sockets, latest } = setup();
+      await start();
       for (let i = 0; i < 3; i++) {
         latest().serverCloses(); // refused before opening
-        vi.advanceTimersByTime(1000);
+        await vi.advanceTimersByTimeAsync(1000);
       }
       expect(sockets).toHaveLength(4);
     });
 
-    it("waits for the next start after a protocol mismatch", () => {
-      const { connection, sockets, latest } = setup();
-      connection.start();
+    it("waits for the next start after a protocol mismatch", async () => {
+      const { start, sockets, latest } = setup();
+      await start();
       latest().open();
       latest().serverCloses(4000);
-      vi.advanceTimersByTime(10_000);
+      await vi.advanceTimersByTimeAsync(10_000);
       expect(sockets).toHaveLength(1);
-      connection.start();
+      await start();
       expect(sockets).toHaveLength(2);
     });
 
-    it("doesn't connect twice when start is called while a reconnect is pending", () => {
-      const { connection, sockets, latest } = setup();
-      connection.start();
+    it("doesn't connect twice when start is called while a reconnect is pending", async () => {
+      const { start, sockets, latest } = setup();
+      await start();
       latest().serverCloses();
-      connection.start();
-      vi.advanceTimersByTime(1000);
+      await start();
+      await vi.advanceTimersByTimeAsync(1000);
       expect(sockets).toHaveLength(2);
+    });
+  });
+
+  describe("config", () => {
+    it("reads it again before each attempt, so a new port is picked up", async () => {
+      const { start, latest, setConfig } = setup();
+      await start();
+      latest().open();
+      setConfig({ port: 5000, token: "new" });
+      latest().serverCloses();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(latest().url).toBe("ws://127.0.0.1:5000/?token=new");
+    });
+
+    it("keeps looking until one appears", async () => {
+      const { start, sockets, setConfig } = setup();
+      setConfig(undefined);
+      await start();
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(sockets).toEqual([]);
+      setConfig({ port: 4000, token: "t" });
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(sockets).toHaveLength(1);
+    });
+
+    it("keeps looking when reading it fails", async () => {
+      const { start, sockets, loadConfig } = setup();
+      loadConfig.mockRejectedValueOnce(new Error("Failed to fetch"));
+      await start();
+      expect(sockets).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(sockets).toHaveLength(1);
+    });
+
+    it("opens one socket when start is called again while it is being read", async () => {
+      const { connection, sockets, loadConfig } = setup();
+      connection.start();
+      connection.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(loadConfig).toHaveBeenCalledTimes(1);
+      expect(sockets).toHaveLength(1);
     });
   });
 });

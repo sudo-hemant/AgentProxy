@@ -88,14 +88,18 @@ export const test = base.extend<Fixtures>({
 });
 
 /**
- * Launches Chromium with a fresh copy of the built extension, paired with the server on `port`.
- * The extension's ID comes from its manifest key, so it doesn't depend on the folder.
+ * Launches Chromium with a fresh copy of the built extension, paired with the server on `port`,
+ * or not paired at all when `port` is undefined. The extension's ID comes from its manifest key,
+ * so it doesn't depend on the folder.
  */
-export async function launchWithExtension(port: number) {
+export async function launchWithExtension(port: number | undefined) {
   const extensionDir = await mkdtemp(join(tmpdir(), "agentproxy-ext-"));
-  await cp(BUILT_EXTENSION, extensionDir, { recursive: true });
-  const config: ExtensionConfig = { port, token: TOKEN };
-  await writeFile(join(extensionDir, EXTENSION_CONFIG_FILE), JSON.stringify(config));
+  await cp(BUILT_EXTENSION, extensionDir, { recursive: true, filter: (src) => !isConfig(src) });
+  const pair = (pairedPort: number) => {
+    const config: ExtensionConfig = { port: pairedPort, token: TOKEN };
+    return writeFile(join(extensionDir, EXTENSION_CONFIG_FILE), JSON.stringify(config));
+  };
+  if (port !== undefined) await pair(port);
 
   const profile = await mkdtemp(join(tmpdir(), "agentproxy-e2e-"));
   const context = await chromium.launchPersistentContext(profile, {
@@ -105,12 +109,19 @@ export async function launchWithExtension(port: number) {
   });
   return {
     context,
+    /** Writes the pairing into the loaded extension's folder, as `agentproxy` would. */
+    pair,
     async close() {
       await context.close();
       await rm(profile, { recursive: true, force: true });
       await rm(extensionDir, { recursive: true, force: true });
     },
   };
+}
+
+/** The developer's own dist/config.json must never leak into a test's copy. */
+function isConfig(path: string): boolean {
+  return path.endsWith(`/${EXTENSION_CONFIG_FILE}`);
 }
 
 export { expect };

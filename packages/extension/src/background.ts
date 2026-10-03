@@ -5,8 +5,6 @@ import { loadConfig } from "./background/config.js";
 import { createServerConnection, type ServerConnection } from "./background/connection.js";
 import { createBackground } from "./background/rules.js";
 
-let connection: ServerConnection | undefined;
-
 const background = createBackground({
   storage: chrome.storage.session,
   async notifyTabs(message) {
@@ -20,29 +18,21 @@ const background = createBackground({
       ),
     );
   },
-  onMatch: (match) => connection?.sendMatch(match),
+  onMatch: (match) => connection.sendMatch(match),
 });
 
 chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendResponse) =>
   background.handleMessage(message, sendResponse),
 );
 
-const connected = loadConfig(fetch, chrome.runtime.getURL(EXTENSION_CONFIG_FILE)).then((config) => {
-  if (!config) {
-    console.warn(`[agentproxy] no valid ${EXTENSION_CONFIG_FILE}: not connecting to the server`);
-    return;
-  }
-  connection = createServerConnection({
-    config,
-    createSocket: (url) => new WebSocket(url),
-    applyRules: background.setRules,
-  });
-  connection.start();
+const connection: ServerConnection = createServerConnection({
+  loadConfig: () => loadConfig(fetch, chrome.runtime.getURL(EXTENSION_CONFIG_FILE)),
+  createSocket: (url) => new WebSocket(url),
+  applyRules: (rules) => background.setRules(rules),
 });
+connection.start();
 
 // If Chrome stops the worker anyway, this alarm starts it again (30 s is the shortest period)
 // and reconnects. Listeners must be added at the top level to wake the worker.
-chrome.alarms.onAlarm.addListener(() => {
-  connected.then(() => connection?.start());
-});
+chrome.alarms.onAlarm.addListener(() => connection.start());
 chrome.alarms.create("keep-connected", { periodInMinutes: 0.5 });
