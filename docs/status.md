@@ -11,7 +11,7 @@ Progress through the MVP steps in [plan.md](plan.md), and the decisions taken in
 | 5. MCP tools | ✅ Done |
 | 6. Basic setup | ✅ Done |
 | 7. End-to-end tests | Next |
-| 8. Real-agent trial | Not started |
+| 8. Real-agent trial | In progress |
 
 ## Step 1: Project setup
 
@@ -258,3 +258,22 @@ An MCP client then started the clone's server exactly as Claude Code would. The 
 - **Install warning:** a fresh `pnpm install` warned that it couldn't create the `agentproxy` bin, because the bin pointed at `dist/`, which doesn't exist before the first build. A committed launcher, `bin/agentproxy.js`, fixes it.
 - **Crash on disconnect:** the server overflowed the stack when the agent disconnected. Overriding the transport's `onclose` replaced the MCP SDK's handler, and closing called shutdown again.
 - **Registration order:** `claude mcp add` put `-e` before the server name. `-e` takes several values, so it could swallow the name.
+
+## Step 8: Real-agent trial
+
+**In progress.** Step 7 isn't finished yet, but the trial started early, once the server was registered with Claude Code.
+
+**Trial 1 (2026-10-03):**
+- **The app:** an existing Vite app on `http://localhost:5173`, in the user's own Chrome, with the extension loaded from `packages/extension/dist`.
+- **What it calls:** a third-party API from the browser, `GET https://dummyjson.com/products/1`.
+- **The agent:** Claude Code, set up through `pnpm run setup` at user scope.
+- **What worked, with no help beyond the prompts:**
+  - `status` reported the extension connected.
+  - `set_mock` changed what the page showed after a reload.
+  - A mock with a short `expires_in_seconds` expired on its own, and the real API answered again.
+  - `list_mocks`, `get_matches` and `clear_mocks` worked as described.
+- **Problems found:** none.
+
+**Still to check:**
+- **Idle Chrome:** leave a normal Chrome idle for 10 minutes or more, then set a mock. This confirms the 20 s pings and the 30 s alarm keep the connection alive (the open item from step 3).
+- **Login:** an app that sends a login token or cookies, to confirm unmocked requests stay logged in outside the test app.
