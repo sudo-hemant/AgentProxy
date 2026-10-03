@@ -4,7 +4,10 @@
     "rootDir": "src",
     "outDir": "dist",
     "declaration": true,
-    "declarationMap": true
+    "declarationMap": true,
+    // Runs in both Node and the page. DOM rather than Node types, so no Node-only API slips in.
+    "lib": ["ES2022", "DOM"],
+    "types": []
   },
   "include": ["src"],
   "exclude": ["src/**/*.test.ts"]
