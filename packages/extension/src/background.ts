@@ -46,6 +46,3 @@ chrome.alarms.onAlarm.addListener(() => {
   connected.then(() => connection?.start());
 });
 chrome.alarms.create("keep-connected", { periodInMinutes: 0.5 });
-
-// Until the browser tests drive the rules through the server (next commit), they use this.
-Object.assign(globalThis, { agentproxy: background });

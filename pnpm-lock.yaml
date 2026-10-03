@@ -26,6 +26,9 @@ importers:
       '@agentproxy/shared':
         specifier: workspace:*
         version: link:../packages/shared
+      agentproxy:
+        specifier: workspace:*
+        version: link:../packages/server
     devDependencies:
       '@playwright/test':
         specifier: ^1.63.0

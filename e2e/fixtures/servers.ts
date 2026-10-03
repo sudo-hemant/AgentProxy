@@ -81,7 +81,12 @@ function listen(
       const { port } = server.address() as AddressInfo;
       resolve({
         url: toUrl(port),
-        close: () => new Promise((done) => server.close(() => done())),
+        close: () =>
+          new Promise((done) => {
+            server.close(() => done());
+            // Don't wait for the browser's idle keep-alive connections to time out.
+            server.closeAllConnections();
+          }),
       });
     });
   });

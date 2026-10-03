@@ -1,6 +1,6 @@
 import type { ExtensionMessage, MatchReport, MockRule } from "@agentproxy/shared";
 import { describe, expect, it, vi } from "vitest";
-import { createBackground, MAX_MATCHES } from "./rules.js";
+import { createBackground } from "./rules.js";
 
 const rule = (id: string): MockRule => ({
   id,
@@ -64,31 +64,15 @@ describe("createBackground", () => {
       await vi.waitFor(() => expect(sendResponse).toHaveBeenCalledWith([rule("a")]));
     });
 
-    it("keeps match reports, oldest first", () => {
-      const { background } = setup();
+    it("passes each match report on, in order, without answering", () => {
+      const { background, forwarded } = setup();
       const sendResponse = vi.fn();
       expect(background.handleMessage({ type: "match", match: match(1) }, sendResponse)).toBe(
         false,
       );
       background.handleMessage({ type: "match", match: match(2) }, sendResponse);
-      expect(background.getMatches()).toEqual([match(1), match(2)]);
+      expect(forwarded).toEqual([match(1), match(2)]);
       expect(sendResponse).not.toHaveBeenCalled();
-    });
-
-    it("passes each match report on", () => {
-      const { background, forwarded } = setup();
-      background.handleMessage({ type: "match", match: match(1) }, () => {});
-      expect(forwarded).toEqual([match(1)]);
-    });
-
-    it("keeps only the most recent match reports", () => {
-      const { background } = setup();
-      for (let n = 0; n < MAX_MATCHES + 5; n++) {
-        background.handleMessage({ type: "match", match: match(n) }, () => {});
-      }
-      const kept = background.getMatches();
-      expect(kept).toHaveLength(MAX_MATCHES);
-      expect(kept[0]).toEqual(match(5));
     });
 
     it("ignores messages meant for the relays", () => {

@@ -7,8 +7,8 @@ Progress through the MVP steps in [plan.md](plan.md), and the decisions taken in
 | 1. Project setup | ✅ Done |
 | 2. Rule model | ✅ Done |
 | 3. Extension core | ✅ Done |
-| 4. Local bridge | Next |
-| 5. MCP tools | Not started |
+| 4. Local bridge | ✅ Done |
+| 5. MCP tools | Next |
 | 6. Basic setup | Not started |
 | 7. End-to-end tests | Not started |
 | 8. Real-agent trial | Not started |
@@ -116,5 +116,53 @@ Each piece's logic sits in a module that takes its browser APIs as arguments, so
 
 **Open items for later steps:**
 - **Step 5:** `set_mock` must reject response statuses outside 200–599, because a browser `Response` can't be built with them.
+- **Step 6:** the server should keep its pairing token across restarts, as the spike did. The extension reads `config.json` only when its service worker starts, so a new token means reloading the extension.
+- **Step 8:** check, in a normal Chrome, that the 20 s pings keep the service worker and the connection alive when idle. Automation keeps the worker awake, so the tests can't show this.
 - **Workers:** requests made from web workers and service workers aren't covered, as noted in the overview.
 - **Dependency warning:** Vitest asks for `@types/node` 22 or later as an optional peer, while the repo uses 20 to match the Node 20 minimum. It's a harmless install warning.
+
+## Step 4: Local bridge
+
+**Result:** the server and the extension talk over a WebSocket on `127.0.0.1`.
+- The server pushes rules, and the extension confirms each version.
+- Match reports flow back to the server.
+- After a server restart, the extension reconnects and receives the new rules.
+
+The e2e tests now set rules through a real server. New tests cover the confirmation, and mocking during and after a server restart (`e2e/tests/server-connection.spec.ts`). The server's start-up command is still a stub: step 5 starts the bridge alongside the MCP tools.
+
+**How the pieces fit:**
+- **Messages:** `shared/src/bridge-protocol.ts`.
+  - Server → extension: `rules {version, rules}`.
+  - Extension → server: `hello {protocolVersion}`, `applied {version}`, `match` and `ping`.
+  - Both sides parse what they receive and drop anything malformed.
+- **Server:**
+  - `bridge.ts` listens on `127.0.0.1` and checks each connection.
+  - `rule-sync.ts` sends rules and waits for confirmations.
+  - `extension-connection.ts` tracks the connection: liveness, protocol version and match reports.
+- **Extension:**
+  - `background/config.ts` reads `config.json`.
+  - `background/connection.ts` connects, applies and confirms rules, pings and reconnects.
+  - `background.ts` wires these to Chrome.
+
+**Decisions:**
+- **Who may connect:** a WebSocket is accepted only if all three checks pass, otherwise the server answers 403.
+  - The Origin is exactly `chrome-extension://hidhibepbghhdfljdadfhcgkgjngeocm`.
+  - The pairing token is right. It's compared in constant time.
+  - The Host is `127.0.0.1` or `localhost` with the server's port, which blocks DNS rebinding.
+- **Fixed extension ID:** the manifest carries a public `key`, so the ID is the same on every machine. Only the public key is in the repo; an extension loaded from a folder needs no private key. A unit test checks that the key and the `EXTENSION_ID` constant match, and Chrome was confirmed to assign that ID. The Chrome Web Store will assign its own ID later.
+- **Default port:** `47821` (`DEFAULT_PORT`).
+- **The extension finds the server through `config.json`** (`{ port, token }`) in its folder. The build doesn't create it but keeps an existing one across rebuilds. Step 6 makes the server write it; the e2e tests write their own into a copy of the extension.
+- **The server is the source of truth for rules:**
+  - Every change gets a new version, and a newly connected extension gets the current list straight away.
+  - `setRules` reports `applied: true` once the extension confirms that version or a newer one. It reports `applied: false` if no extension is connected, or if there's no confirmation within 5 s.
+  - The extension applies rule lists in the order they arrive. It doesn't confirm a list it failed to store.
+- **While the server is down,** the extension keeps its last rules, so pages stay mocked until the rules expire. On reconnect, the server's list replaces them. A restarted server starts with no rules.
+- **Keeping the connection alive:**
+  - The extension pings every 20 s, which also keeps Chrome from stopping the service worker.
+  - The server drops a connection that's silent for 60 s.
+  - The extension reconnects 1 s after a drop.
+  - An alarm every 30 s, the shortest Chrome allows, restarts the worker and the connection if Chrome stopped them anyway. This needs the `alarms` permission.
+- **One extension at a time:** a newer connection replaces an older one, for example after the extension is reloaded.
+- **Protocol mismatch:** the server closes with code 4000. The extension then retries only when the alarm next fires, not every second.
+- **Matches go to the server.** The background passes each one on and keeps none. Reports made while disconnected are lost.
+- **Scaffolding removed:** the demo rule and the `globalThis.agentproxy` debug handle are gone.

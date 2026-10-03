@@ -1,6 +1,6 @@
-// MVP step 3: the extension, given rules directly in its service worker, mocks fetch and axios
-// in a localhost page, leaves other requests and their auth alone, applies rules during page
-// load, and picks up rule changes without a reload.
+// MVP step 3: the extension, given rules by the server, mocks fetch and axios in a localhost
+// page, leaves other requests and their auth alone, applies rules during page load, and picks
+// up rule changes without a reload.
 import type { MockRule } from "@agentproxy/shared";
 import type { Page } from "@playwright/test";
 import { expect, test } from "../fixtures/extension.js";
@@ -85,21 +85,17 @@ test("applies rule changes to an open page without a reload", async ({
   await expect.poll(async () => (await pageFetch(page, "/orders")).body.source).toBe("real");
 });
 
-test("reports which requests the mocks answered", async ({
-  app,
-  api,
-  page,
-  setRules,
-  getMatches,
-}) => {
+test("reports which requests the mocks answered", async ({ app, api, page, setRules, server }) => {
   await setRules([ordersRule(api.url)]);
   await page.goto(app.url);
   await page.evaluate(() => (window as unknown as { onLoadResult: Promise<unknown> }).onLoadResult);
   await pageAxios(page, "/orders");
   await pageFetch(page, "/users"); // not mocked: not reported
 
-  await expect.poll(getMatches).toEqual([
-    { ruleId: "orders-500", method: "GET", url: `${api.url}/orders`, transport: "fetch" },
-    { ruleId: "orders-500", method: "GET", url: `${api.url}/orders`, transport: "xhr" },
-  ]);
+  await expect
+    .poll(() => server.matches)
+    .toEqual([
+      { ruleId: "orders-500", method: "GET", url: `${api.url}/orders`, transport: "fetch" },
+      { ruleId: "orders-500", method: "GET", url: `${api.url}/orders`, transport: "xhr" },
+    ]);
 });

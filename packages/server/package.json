@@ -3,6 +3,12 @@
   "version": "0.0.0",
   "description": "MCP server that lets an AI coding agent mock API responses in the developer's Chrome.",
   "type": "module",
+  "exports": {
+    "./bridge": {
+      "types": "./dist/bridge.d.ts",
+      "default": "./dist/bridge.js"
+    }
+  },
   "bin": {
     "agentproxy": "./dist/index.js"
   },
