@@ -14,9 +14,10 @@
     }
   },
   "bin": {
-    "agentproxy": "./dist/index.js"
+    "agentproxy": "./bin/agentproxy.js"
   },
   "files": [
+    "bin",
     "dist"
   ],
   "engines": {
