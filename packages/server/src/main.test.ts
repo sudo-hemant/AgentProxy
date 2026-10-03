@@ -1,5 +1,8 @@
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { EXTENSION_ORIGIN } from "@agentproxy/shared";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -13,12 +16,27 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
+/** An empty extension folder for the pairing, removed after the test. */
+async function extensionFolder() {
+  const dir = await mkdtemp(join(tmpdir(), "agentproxy-ext-"));
+  cleanups.push(() => rm(dir, { recursive: true, force: true }));
+  return dir;
+}
+
+const readConfig = async (dir: string) =>
+  JSON.parse(await readFile(join(dir, "config.json"), "utf8"));
+
 /** Starts AgentProxy with a real bridge and an MCP client talking to it in-process. */
-async function start(port = 0) {
+async function start({
+  port = 0,
+  token = TOKEN as string | null, // null: no forced token
+  extensionDir = undefined as string | undefined,
+} = {}) {
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const proxy: AgentProxy = await startAgentProxy({
     port,
-    token: TOKEN,
+    token: token ?? undefined,
+    extensionDir: extensionDir ?? (await extensionFolder()),
     version: "test",
     transport: serverTransport,
   });
@@ -78,11 +96,54 @@ describe("startAgentProxy", () => {
     cleanups.push(() => new Promise((resolve) => blocker.close(() => resolve())));
     const { port } = blocker.address() as AddressInfo;
 
-    const { proxy, call } = await start(port);
+    const { proxy, call } = await start({ port });
     expect(proxy.listening).toEqual({ error: expect.stringMatching(/already in use/) });
     const set = await call("set_mock", { url: "*/api/orders" });
     expect(set.applied).toBe(false);
     const status = await call("status");
     expect(status.note).toMatch(new RegExp(`port ${port} is already in use`));
+  });
+
+  describe("pairing", () => {
+    it("writes the actual port and the token into the extension folder", async () => {
+      const dir = await extensionFolder();
+      const { proxy, call } = await start({ extensionDir: dir });
+      const { port } = proxy.listening as { port: number };
+      expect(await readConfig(dir)).toEqual({ port, token: TOKEN });
+      expect(proxy.pairing).toEqual({ extensionDir: dir });
+      expect((await call("status")).extension_dir).toBe(dir);
+    });
+
+    it("reuses the paired token when none is forced, so restarts keep the pairing", async () => {
+      const dir = await extensionFolder();
+      await writeFile(join(dir, "config.json"), '{"port":1234,"token":"kept"}');
+      const { proxy } = await start({ extensionDir: dir, token: null });
+      expect(await readConfig(dir)).toEqual({
+        port: (proxy.listening as { port: number }).port,
+        token: "kept",
+      });
+    });
+
+    it("makes up a token when there is no pairing yet", async () => {
+      const dir = await extensionFolder();
+      await start({ extensionDir: dir, token: null });
+      expect((await readConfig(dir)).token).toMatch(/^[0-9a-f]{32}$/);
+    });
+
+    it("lets a forced token replace the paired one", async () => {
+      const dir = await extensionFolder();
+      await writeFile(join(dir, "config.json"), '{"port":1234,"token":"old"}');
+      await start({ extensionDir: dir, token: "forced" });
+      expect((await readConfig(dir)).token).toBe("forced");
+    });
+
+    it("still runs when the folder is missing, and status says why", async () => {
+      const missing = join(await extensionFolder(), "not-built");
+      const { proxy, call } = await start({ extensionDir: missing });
+      expect(proxy.pairing).toEqual({ error: `${missing} doesn't exist` });
+      const status = await call("status");
+      expect(status.pairing_error).toBe(`${missing} doesn't exist`);
+      expect(status.note).toMatch(/can't be paired.*pnpm build/);
+    });
   });
 });

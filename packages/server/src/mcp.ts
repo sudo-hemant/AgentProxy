@@ -16,9 +16,13 @@ export interface BrowserLink {
 /** Where the bridge listens for the extension, or why it couldn't start. */
 export type Listening = { port: number } | { error: string };
 
+/** The extension folder the pairing was written to, or why it couldn't be. */
+export type Pairing = { extensionDir: string } | { error: string };
+
 export interface McpServerDeps {
   browser: BrowserLink;
   listening: Listening;
+  pairing?: Pairing;
   store: MockStore;
   matches: MatchLog;
   version: string;
@@ -30,6 +34,7 @@ export interface McpServerDeps {
 export function createMcpServer({
   browser,
   listening,
+  pairing,
   store,
   matches,
   version,
@@ -161,9 +166,11 @@ export function createMcpServer({
       return reply({
         extension_connected: connected,
         ...("port" in listening ? { port: listening.port } : { error: listening.error }),
+        ...(pairing && "extensionDir" in pairing ? { extension_dir: pairing.extensionDir } : {}),
+        ...(pairing && "error" in pairing ? { pairing_error: pairing.error } : {}),
         active_mocks: store.list().length,
         version,
-        note: statusNote(listening, connected),
+        note: statusNote(listening, connected, pairing),
       });
     },
   );
@@ -171,17 +178,22 @@ export function createMcpServer({
   return server;
 }
 
-function statusNote(listening: Listening, connected: boolean): string {
+function statusNote(listening: Listening, connected: boolean, pairing?: Pairing): string {
   if ("error" in listening) {
     return `The server can't reach the browser: ${listening.error}`;
   }
-  if (!connected) {
+  if (connected) return "Ready: mocks set now reach the browser.";
+  if (pairing && "error" in pairing) {
     return (
-      "Waiting for the browser: open Chrome with the AgentProxy extension loaded and paired " +
-      `with this server (port ${listening.port}).`
+      `The extension can't be paired: ${pairing.error}. Build the extension (pnpm build), or ` +
+      "set AGENTPROXY_EXTENSION_DIR to the folder Chrome loads it from."
     );
   }
-  return "Ready: mocks set now reach the browser.";
+  const folder = pairing && "extensionDir" in pairing ? ` from ${pairing.extensionDir}` : "";
+  return (
+    "Waiting for the browser: open Chrome with the AgentProxy extension loaded" +
+    `${folder} (chrome://extensions, Developer mode, Load unpacked).`
+  );
 }
 
 /** The agent-facing view of a mock: the same field names `set_mock` takes. */

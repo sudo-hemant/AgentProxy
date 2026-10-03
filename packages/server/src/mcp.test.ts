@@ -315,7 +315,7 @@ describe("MCP server", () => {
       const { call } = await connect(fakeBrowser({ connected: false }).browser);
       const { data } = await call("status");
       expect(data.extension_connected).toBe(false);
-      expect(data.note).toMatch(/open Chrome with the AgentProxy extension.*port 47821/);
+      expect(data.note).toMatch(/open Chrome with the AgentProxy extension loaded/);
     });
 
     it("reports why the server can't reach the browser", async () => {

@@ -1,5 +1,8 @@
 // A Playwright test where an MCP client drives AgentProxy's tools, as an agent would, against
 // the built extension in Chromium, plus the test app and API.
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { type BrowserContext, test as base, expect } from "@playwright/test";
@@ -43,9 +46,12 @@ export const agentTest = base.extend<Fixtures>({
   // biome-ignore lint/correctness/noEmptyPattern: Playwright needs the destructuring pattern.
   agent: async ({}, use) => {
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    // AgentProxy writes its pairing here; the browser loads its own copy (launchWithExtension).
+    const pairingDir = await mkdtemp(join(tmpdir(), "agentproxy-pairing-"));
     const proxy = await startAgentProxy({
       port: 0,
       token: TOKEN,
+      extensionDir: pairingDir,
       version: "e2e",
       transport: serverTransport,
     });
@@ -62,6 +68,7 @@ export const agentTest = base.extend<Fixtures>({
     });
     await client.close();
     await proxy.close();
+    await rm(pairingDir, { recursive: true, force: true });
   },
   callTool: async ({ agent }, use) => {
     await use(agent.callTool);
