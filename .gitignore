@@ -8,3 +8,7 @@ spike/certs/
 spike/extension/config.js
 # - test run outputs
 spike/results/
+
+# Build outputs
+dist/
+*.tsbuildinfo

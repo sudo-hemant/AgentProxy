@@ -1,0 +1,22 @@
+{
+  "name": "agentproxy",
+  "version": "0.0.0",
+  "description": "MCP server that lets an AI coding agent mock API responses in the developer's Chrome.",
+  "type": "module",
+  "bin": {
+    "agentproxy": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@agentproxy/shared": "workspace:*"
+  }
+}

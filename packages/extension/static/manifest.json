@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "AgentProxy",
+  "version": "0.0.0",
+  "description": "Lets your AI coding agent mock API responses in localhost pages.",
+  "minimum_chrome_version": "120",
+  "background": { "service_worker": "background.js" },
+  "permissions": ["storage"],
+  "host_permissions": ["http://localhost/*", "http://127.0.0.1/*"],
+  "content_scripts": [
+    {
+      "matches": ["http://localhost/*"],
+      "js": ["page-wrapper.js"],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": true
+    },
+    {
+      "matches": ["http://localhost/*"],
+      "js": ["relay.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ]
+}

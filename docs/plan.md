@@ -31,7 +31,7 @@ agentproxy/
 
 ## MVP steps
 
-Each step ends with something that runs and is tested.
+Each step ends with something that runs and is tested. Progress and the decisions taken in each step are in [status.md](status.md).
 
 1. **Project setup.** Create the pnpm workspace, TypeScript config, esbuild build for the extension, Biome, and Vitest. *Done when* `pnpm build`, `pnpm lint` and `pnpm test` pass on an empty skeleton.
 

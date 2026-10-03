@@ -1,0 +1,22 @@
+{
+  "name": "@agentproxy/shared",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Rule types, URL/method matcher, and server/extension message types shared by AgentProxy packages.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}
