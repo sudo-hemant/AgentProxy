@@ -14,16 +14,21 @@ const ordersRule: MockRule = {
 };
 
 let realSend: Mock<XMLHttpRequest["send"]>;
+let realAbort: Mock<XMLHttpRequest["abort"]>;
 let originalSend: typeof XMLHttpRequest.prototype.send;
+let originalAbort: typeof XMLHttpRequest.prototype.abort;
 let store: RuleStore;
 let reports: MatchReport[];
 let uninstall: () => void;
 
 beforeEach(() => {
-  // Stands in for the network: the wrapper captures this as the real send.
+  // Stand in for the network: the wrapper captures these as the real send and abort.
   originalSend = XMLHttpRequest.prototype.send;
+  originalAbort = XMLHttpRequest.prototype.abort;
   realSend = vi.fn<XMLHttpRequest["send"]>();
+  realAbort = vi.fn<XMLHttpRequest["abort"]>();
   XMLHttpRequest.prototype.send = realSend;
+  XMLHttpRequest.prototype.abort = realAbort;
   store = createRuleStore();
   reports = [];
   uninstall = installXhrWrapper(XMLHttpRequest, store, (m) => reports.push(m), BASE);
@@ -32,6 +37,7 @@ beforeEach(() => {
 afterEach(() => {
   uninstall();
   XMLHttpRequest.prototype.send = originalSend;
+  XMLHttpRequest.prototype.abort = originalAbort;
 });
 
 /** Sends a request and resolves once its load event fires. */
@@ -199,8 +205,82 @@ describe("installXhrWrapper", () => {
     });
   });
 
-  it("restores the real open and send when uninstalled", () => {
+  describe("abort while waiting for the rules", () => {
+    it("drops the request and fires the abort events", async () => {
+      const xhr = openXhr("GET", "/api/orders");
+      const events: string[] = [];
+      xhr.onreadystatechange = () => events.push(`readystatechange:${xhr.readyState}`);
+      xhr.onabort = () => events.push("abort");
+      xhr.addEventListener("loadend", () => events.push("loadend"));
+      xhr.addEventListener("load", () => events.push("load"));
+      xhr.send();
+      xhr.abort();
+      expect(events).toEqual(["readystatechange:4", "abort", "loadend"]);
+      expect(xhr.readyState).toBe(XMLHttpRequest.UNSENT);
+      expect(xhr.status).toBe(0);
+
+      store.setRules([ordersRule]);
+      await store.ready;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(events).not.toContain("load");
+      expect(realSend).not.toHaveBeenCalled();
+      expect(realAbort).not.toHaveBeenCalled();
+      expect(reports).toEqual([]);
+    });
+
+    it("drops an unmatched request too, instead of sending it later", async () => {
+      const xhr = openXhr("GET", "/api/users");
+      xhr.send();
+      xhr.abort();
+      store.setRules([ordersRule]);
+      await store.ready;
+      expect(realSend).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("abort once the request is out", () => {
+    it("uses the real abort", async () => {
+      store.setRules([ordersRule]);
+      const xhr = openXhr("GET", "/api/users");
+      xhr.send();
+      await vi.waitFor(() => expect(realSend).toHaveBeenCalled());
+      xhr.abort();
+      expect(realAbort).toHaveBeenCalledTimes(1);
+      expect(realAbort.mock.contexts[0]).toBe(xhr);
+    });
+  });
+
+  describe("open again", () => {
+    it("cancels a send still waiting for the rules, silently", async () => {
+      const xhr = openXhr("GET", "/api/users");
+      const aborts = vi.fn();
+      xhr.onabort = aborts;
+      xhr.send();
+      xhr.open("GET", "/api/orders");
+      const loaded = load(xhr);
+      store.setRules([ordersRule]);
+      await loaded;
+      expect(realSend).not.toHaveBeenCalled(); // the cancelled /api/users never went out
+      expect(aborts).not.toHaveBeenCalled();
+      expect(reports.map((r) => r.url)).toEqual(["http://localhost:3000/api/orders"]);
+    });
+
+    it("clears an earlier mocked response so the XHR can be reused", async () => {
+      store.setRules([ordersRule]);
+      const xhr = openXhr("GET", "/api/orders");
+      await load(xhr);
+      expect(xhr.status).toBe(500);
+
+      xhr.open("GET", "/api/users");
+      expect(xhr.readyState).toBe(XMLHttpRequest.OPENED);
+      expect(xhr.status).toBe(0);
+      expect(Object.hasOwn(xhr, "getResponseHeader")).toBe(false);
+    });
+  });
+
+  it("restores the real open, send and abort when uninstalled", () => {
     uninstall();
     expect(XMLHttpRequest.prototype.send).toBe(realSend);
+    expect(XMLHttpRequest.prototype.abort).toBe(realAbort);
   });
 });

@@ -23,7 +23,11 @@ export function installXhrWrapper(
   const proto = Xhr.prototype;
   const realOpen = proto.open;
   const realSend = proto.send;
+  const realAbort = proto.abort;
   const opened = new WeakMap<XMLHttpRequest, OpenedRequest>();
+  // Async requests whose send is waiting for the rules. A new token per send, so an answer
+  // meant for an earlier, cancelled send is recognised and dropped.
+  const waiting = new WeakMap<XMLHttpRequest, object>();
 
   proto.open = function (
     this: XMLHttpRequest,
@@ -31,6 +35,9 @@ export function installXhrWrapper(
     url: string | URL,
     ...rest: unknown[]
   ) {
+    // Opening again cancels a send still waiting for the rules, and starts with a clean object.
+    waiting.delete(this);
+    clearMockedResponse(this);
     try {
       opened.set(this, {
         method: method.toUpperCase(),
@@ -56,12 +63,25 @@ export function installXhrWrapper(
     // A synchronous request must finish before send returns, so it can't wait for the rules:
     // it is mocked only if they have already arrived.
     if (!request.async) return store.hasRules() ? answer() : realSend.call(this, body);
-    store.ready.then(answer);
+    const token = {};
+    waiting.set(this, token);
+    store.ready.then(() => {
+      if (waiting.get(this) !== token) return; // aborted or re-opened meanwhile
+      waiting.delete(this);
+      answer();
+    });
+  };
+
+  proto.abort = function (this: XMLHttpRequest) {
+    // The real XHR hasn't been sent yet, so its abort would do nothing: abort it ourselves.
+    if (!waiting.delete(this)) return realAbort.call(this);
+    abortWaiting(this);
   };
 
   return () => {
     proto.open = realOpen;
     proto.send = realSend;
+    proto.abort = realAbort;
   };
 }
 
@@ -69,8 +89,7 @@ export function installXhrWrapper(
 function respondWithMock(xhr: XMLHttpRequest, rule: MockRule, url: string, async: boolean): void {
   const { status, headers, body } = buildMockResponse(rule.response);
   const text = body ?? "";
-  const define = (name: string, value: unknown) =>
-    Object.defineProperty(xhr, name, { configurable: true, get: () => value });
+  const define = (name: string, value: unknown) => overrideProperty(xhr, name, value);
 
   define("readyState", XMLHttpRequest.DONE);
   define("status", status);
@@ -99,6 +118,38 @@ function respondWithMock(xhr: XMLHttpRequest, rule: MockRule, url: string, async
   // An async response arrives after send has returned; a sync one, before it returns.
   if (async) setTimeout(fireEvents, 0);
   else fireEvents();
+}
+
+/** Fires what a browser fires when a sent request is aborted, then leaves the XHR unsent. */
+function abortWaiting(xhr: XMLHttpRequest): void {
+  overrideProperty(xhr, "readyState", XMLHttpRequest.DONE);
+  overrideProperty(xhr, "status", 0);
+  xhr.dispatchEvent(new Event("readystatechange"));
+  for (const type of ["abort", "loadend"]) {
+    xhr.dispatchEvent(new ProgressEvent(type, { lengthComputable: false, loaded: 0, total: 0 }));
+  }
+  overrideProperty(xhr, "readyState", XMLHttpRequest.UNSENT);
+}
+
+/** Every property a mocked response or an abort sets on the XHR object itself. */
+const OVERRIDDEN = [
+  "readyState",
+  "status",
+  "statusText",
+  "responseURL",
+  "response",
+  "responseText",
+  "getResponseHeader",
+  "getAllResponseHeaders",
+] as const;
+
+function overrideProperty(xhr: XMLHttpRequest, name: string, value: unknown): void {
+  Object.defineProperty(xhr, name, { configurable: true, get: () => value });
+}
+
+/** Removes the overrides so the XHR's own properties and methods show through again. */
+function clearMockedResponse(xhr: XMLHttpRequest): void {
+  for (const name of OVERRIDDEN) delete (xhr as unknown as Record<string, unknown>)[name];
 }
 
 /** The value of `xhr.response` for the request's `responseType`. */
