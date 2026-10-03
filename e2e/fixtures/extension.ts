@@ -72,26 +72,12 @@ export const test = base.extend<Fixtures>({
     await handle.bridge.close();
   },
   context: async ({ server }, use) => {
-    // A fresh copy of the extension per test, paired with this test's server. The ID comes from
-    // the manifest key, so it doesn't depend on the folder.
-    const extensionDir = await mkdtemp(join(tmpdir(), "agentproxy-ext-"));
-    await cp(BUILT_EXTENSION, extensionDir, { recursive: true });
-    const config: ExtensionConfig = { port: server.bridge.port, token: TOKEN };
-    await writeFile(join(extensionDir, EXTENSION_CONFIG_FILE), JSON.stringify(config));
-
-    const profile = await mkdtemp(join(tmpdir(), "agentproxy-e2e-"));
-    const context = await chromium.launchPersistentContext(profile, {
-      channel: "chromium", // the full Chromium build, which can load extensions headless
-      headless: true,
-      args: [`--disable-extensions-except=${extensionDir}`, `--load-extension=${extensionDir}`],
-    });
+    const browser = await launchWithExtension(server.bridge.port);
     await expect
       .poll(() => server.bridge.isConnected(), { message: "extension connects" })
       .toBe(true);
-    await use(context);
-    await context.close();
-    await rm(profile, { recursive: true, force: true });
-    await rm(extensionDir, { recursive: true, force: true });
+    await use(browser.context);
+    await browser.close();
   },
   setRules: async ({ server, context: _context }, use) => {
     await use(async (rules) => {
@@ -100,5 +86,31 @@ export const test = base.extend<Fixtures>({
     });
   },
 });
+
+/**
+ * Launches Chromium with a fresh copy of the built extension, paired with the server on `port`.
+ * The extension's ID comes from its manifest key, so it doesn't depend on the folder.
+ */
+export async function launchWithExtension(port: number) {
+  const extensionDir = await mkdtemp(join(tmpdir(), "agentproxy-ext-"));
+  await cp(BUILT_EXTENSION, extensionDir, { recursive: true });
+  const config: ExtensionConfig = { port, token: TOKEN };
+  await writeFile(join(extensionDir, EXTENSION_CONFIG_FILE), JSON.stringify(config));
+
+  const profile = await mkdtemp(join(tmpdir(), "agentproxy-e2e-"));
+  const context = await chromium.launchPersistentContext(profile, {
+    channel: "chromium", // the full Chromium build, which can load extensions headless
+    headless: true,
+    args: [`--disable-extensions-except=${extensionDir}`, `--load-extension=${extensionDir}`],
+  });
+  return {
+    context,
+    async close() {
+      await context.close();
+      await rm(profile, { recursive: true, force: true });
+      await rm(extensionDir, { recursive: true, force: true });
+    },
+  };
+}
 
 export { expect };

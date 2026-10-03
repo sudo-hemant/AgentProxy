@@ -8,8 +8,8 @@ Progress through the MVP steps in [plan.md](plan.md), and the decisions taken in
 | 2. Rule model | ✅ Done |
 | 3. Extension core | ✅ Done |
 | 4. Local bridge | ✅ Done |
-| 5. MCP tools | Next |
-| 6. Basic setup | Not started |
+| 5. MCP tools | ✅ Done |
+| 6. Basic setup | Next |
 | 7. End-to-end tests | Not started |
 | 8. Real-agent trial | Not started |
 
@@ -115,7 +115,6 @@ Each piece's logic sits in a module that takes its browser APIs as arguments, so
   - `pnpm test:e2e` builds everything first.
 
 **Open items for later steps:**
-- **Step 5:** `set_mock` must reject response statuses outside 200–599, because a browser `Response` can't be built with them.
 - **Step 6:** the server should keep its pairing token across restarts, as the spike did. The extension reads `config.json` only when its service worker starts, so a new token means reloading the extension.
 - **Step 8:** check, in a normal Chrome, that the 20 s pings keep the service worker and the connection alive when idle. Automation keeps the worker awake, so the tests can't show this.
 - **Workers:** requests made from web workers and service workers aren't covered, as noted in the overview.
@@ -166,3 +165,54 @@ The e2e tests now set rules through a real server. New tests cover the confirmat
 - **Protocol mismatch:** the server closes with code 4000. The extension then retries only when the alarm next fires, not every second.
 - **Matches go to the server.** The background passes each one on and keeps none. Reports made while disconnected are lost.
 - **Scaffolding removed:** the demo rule and the `globalThis.agentproxy` debug handle are gone.
+
+## Step 5: MCP tools
+
+**Result:** the `agentproxy` command serves five tools over stdio: `set_mock`, `list_mocks`, `clear_mocks`, `get_matches` and `status`.
+
+Browser tests (`e2e/tests/agent-tools.spec.ts`) drive the real extension through an MCP client:
+- set a mock and see the page get it;
+- find the request in `get_matches`;
+- clear the mock and see the real API answer again;
+- watch a 2-second mock expire on its own.
+
+`e2e/tests/cli.spec.ts` starts the built command over stdio, checks its tools, and checks that it exits on its own when the agent closes stdin.
+
+**How the pieces fit** (all in `packages/server/src`):
+- **`index.ts`:** the command. It reads its settings, starts everything, logs only to stderr and exits when stdin closes.
+- **`settings.ts`:** reads `AGENTPROXY_PORT` and `AGENTPROXY_TOKEN`.
+- **`main.ts`:** `startAgentProxy` wires everything together over any MCP transport.
+- **`mcp.ts`:** the five tools.
+- **`mock-input.ts`:** the `set_mock` input schema and its checks.
+- **`mock-store.ts`:** the live mocks.
+- **`match-log.ts`:** recent matches.
+
+**Decisions:**
+- **`set_mock` input is flat.** Only `url` is required. The other fields are `match_type`, `regex_flags`, `method`, `status`, `body`, `headers`, `expires_in_seconds` and `id`. The field descriptions explain the behaviour, because they're what the agent reads.
+- **Defaults:**
+  - `match_type` is `wildcard`.
+  - `status` is 200. It must be 200–599, because a browser `Response` can't be built with anything else.
+  - A mock expires after 600 s, at most 86400 s, so an agent can't leave mocks behind for long.
+  - A mock without an `id` gets a generated one.
+- **Ids:** setting a mock with an existing `id` replaces it, and the replacement becomes the newest. When several mocks match a request, the newest wins.
+- **Bad URL patterns are rejected up front:** a relative exact URL, a domain with a path, an invalid regex, or `regex_flags` without `match_type: regex`.
+- **Every change sends the browser the full list of live mocks.** Each reply says whether the browser confirmed it (`applied`), with a note on what to do next: it's active, open Chrome with the extension, or check `get_matches`.
+- **No timer pushes expiries to the browser.** Both sides ignore expired mocks by the clock, and the next change sends the cleaned-up list.
+- **`list_mocks`** reports mocks with the same field names `set_mock` takes, plus when they expire.
+- **`clear_mocks`** clears everything, or the given `ids`, and reports any ids it didn't find.
+- **`get_matches`:**
+  - returns the most recent 50 matches by default, at most 500, oldest first, with the total;
+  - can filter by `mock_id`, and by `since` as an ISO timestamp;
+  - when nothing matched, its note says to reload the page and check the pattern.
+- **The match log** keeps the last 500 matches, in memory only.
+- **`status`** reports:
+  - whether the extension is connected;
+  - the port, or why the server couldn't listen;
+  - the number of live mocks and the version;
+  - a note on what to do next.
+- **If the port is taken,** for example by a second agent session, the tools still start: `set_mock` reports `applied: false`, and `status` explains the problem and how to use another port.
+- **Tool replies are JSON in a text block,** which every MCP client can read.
+- **Settings:**
+  - `AGENTPROXY_PORT` defaults to 47821, and 0 picks a free port.
+  - `AGENTPROXY_TOKEN` is random for each run if unset. Step 6 keeps it across restarts and writes it to the extension's `config.json`.
+- **Package exports:** the server package exports `agentproxy/bridge` and `agentproxy/main` for the e2e fixtures.
