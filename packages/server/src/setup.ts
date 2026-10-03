@@ -96,13 +96,14 @@ async function register(options: SetupOptions, env: Record<string, string>): Pro
   // Replace any earlier registration, so running setup again is safe.
   await run("claude", ["mcp", "remove", "--scope", options.scope, SERVER_NAME]);
   const envArgs = Object.entries(env).flatMap(([key, value]) => ["-e", `${key}=${value}`]);
+  // The name goes first: -e takes several values and would swallow a name placed after it.
   const addArgs = [
     "mcp",
     "add",
+    SERVER_NAME,
     "--scope",
     options.scope,
     ...envArgs,
-    SERVER_NAME,
     "--",
     options.nodePath,
     options.serverEntry,

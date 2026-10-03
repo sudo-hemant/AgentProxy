@@ -89,9 +89,9 @@ describe("runSetup", () => {
         "claude",
         "mcp",
         "add",
+        "agentproxy",
         "--scope",
         "user",
-        "agentproxy",
         "--",
         "/usr/bin/node",
         "/repo/packages/server/dist/index.js",
@@ -106,11 +106,11 @@ describe("runSetup", () => {
       "claude",
       "mcp",
       "add",
+      "agentproxy",
       "--scope",
       "project",
       "-e",
       "AGENTPROXY_PORT=5000",
-      "agentproxy",
       "--",
       "/usr/bin/node",
       "/repo/packages/server/dist/index.js",
@@ -143,7 +143,7 @@ describe("runSetup", () => {
     );
     expect(code).toBe(1);
     expect(output).toContain("Registering with Claude Code failed:\nboom");
-    expect(output).toContain("To try by hand: claude mcp add --scope user agentproxy -- ");
+    expect(output).toContain("To try by hand: claude mcp add agentproxy --scope user -- ");
   });
 
   it("says how to load the extension", async () => {
