@@ -24,7 +24,8 @@
   },
   "dependencies": {
     "@agentproxy/shared": "workspace:*",
-    "ws": "^8.22.0"
+    "ws": "^8.22.0",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/ws": "^8.18.2"
