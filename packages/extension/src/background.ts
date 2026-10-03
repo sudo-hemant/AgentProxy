@@ -1,9 +1,11 @@
-// The extension's service worker. It holds the rules, hands them to the relays, and keeps the
-// match reports the relays forward. Until MVP step 4 connects it to the server, it starts with
-// the demo rules.
-import type { ExtensionMessage } from "@agentproxy/shared";
-import { DEMO_RULES } from "./background/demo-rules.js";
+// The extension's service worker. It connects to the AgentProxy server, stores the rules the
+// server sends, hands them to the relays, and reports matches back to the server.
+import { EXTENSION_CONFIG_FILE, type ExtensionMessage } from "@agentproxy/shared";
+import { loadConfig } from "./background/config.js";
+import { createServerConnection, type ServerConnection } from "./background/connection.js";
 import { createBackground } from "./background/rules.js";
+
+let connection: ServerConnection | undefined;
 
 const background = createBackground({
   storage: chrome.storage.session,
@@ -18,13 +20,32 @@ const background = createBackground({
       ),
     );
   },
+  onMatch: (match) => connection?.sendMatch(match),
 });
 
 chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendResponse) =>
   background.handleMessage(message, sendResponse),
 );
 
-background.seedRules(DEMO_RULES);
+const connected = loadConfig(fetch, chrome.runtime.getURL(EXTENSION_CONFIG_FILE)).then((config) => {
+  if (!config) {
+    console.warn(`[agentproxy] no valid ${EXTENSION_CONFIG_FILE}: not connecting to the server`);
+    return;
+  }
+  connection = createServerConnection({
+    config,
+    createSocket: (url) => new WebSocket(url),
+    applyRules: background.setRules,
+  });
+  connection.start();
+});
 
-// Reachable from the service worker console, and from tests, until the server drives the rules.
+// If Chrome stops the worker anyway, this alarm starts it again (30 s is the shortest period)
+// and reconnects. Listeners must be added at the top level to wake the worker.
+chrome.alarms.onAlarm.addListener(() => {
+  connected.then(() => connection?.start());
+});
+chrome.alarms.create("keep-connected", { periodInMinutes: 0.5 });
+
+// Until the browser tests drive the rules through the server (next commit), they use this.
 Object.assign(globalThis, { agentproxy: background });

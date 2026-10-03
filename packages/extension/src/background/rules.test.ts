@@ -20,7 +20,9 @@ const match = (n: number): MatchReport => ({
 function setup(initial: Record<string, unknown> = {}) {
   const stored: Record<string, unknown> = { ...initial };
   const notified: ExtensionMessage[] = [];
+  const forwarded: MatchReport[] = [];
   const background = createBackground({
+    onMatch: (match) => forwarded.push(match),
     storage: {
       get: async (key) => (key in stored ? { [key]: stored[key] } : {}),
       set: async (items) => {
@@ -31,7 +33,7 @@ function setup(initial: Record<string, unknown> = {}) {
       notified.push(message);
     },
   });
-  return { background, stored, notified };
+  return { background, stored, notified, forwarded };
 }
 
 describe("createBackground", () => {
@@ -54,22 +56,6 @@ describe("createBackground", () => {
     });
   });
 
-  describe("seedRules", () => {
-    it("fills in rules when none are stored", async () => {
-      const { background, notified } = setup();
-      await background.seedRules([rule("demo")]);
-      expect(await background.getRules()).toEqual([rule("demo")]);
-      expect(notified).toHaveLength(1);
-    });
-
-    it("keeps stored rules, even an empty list", async () => {
-      const { background, notified } = setup({ rules: [] });
-      await background.seedRules([rule("demo")]);
-      expect(await background.getRules()).toEqual([]);
-      expect(notified).toEqual([]);
-    });
-  });
-
   describe("handleMessage", () => {
     it("answers get-rules asynchronously with the stored rules", async () => {
       const { background } = setup({ rules: [rule("a")] });
@@ -87,6 +73,12 @@ describe("createBackground", () => {
       background.handleMessage({ type: "match", match: match(2) }, sendResponse);
       expect(background.getMatches()).toEqual([match(1), match(2)]);
       expect(sendResponse).not.toHaveBeenCalled();
+    });
+
+    it("passes each match report on", () => {
+      const { background, forwarded } = setup();
+      background.handleMessage({ type: "match", match: match(1) }, () => {});
+      expect(forwarded).toEqual([match(1)]);
     });
 
     it("keeps only the most recent match reports", () => {

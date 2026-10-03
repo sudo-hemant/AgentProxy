@@ -13,6 +13,8 @@ export interface BackgroundDeps {
   };
   /** Sends a message to the relays in every open tab the extension covers. */
   notifyTabs(message: ExtensionMessage): Promise<void>;
+  /** Called for every match report a relay forwards. */
+  onMatch?(match: MatchReport): void;
 }
 
 export interface Background {
@@ -21,8 +23,6 @@ export interface Background {
   getRules(): Promise<MockRule[]>;
   /** The most recent match reports, oldest first. */
   getMatches(): MatchReport[];
-  /** Fills in `rules` only if none are stored yet, so a restarted worker keeps its rules. */
-  seedRules(rules: MockRule[]): Promise<void>;
   /** A `chrome.runtime.onMessage` listener for the relays' messages. */
   handleMessage(message: ExtensionMessage, sendResponse: (response: unknown) => void): boolean;
 }
@@ -44,10 +44,6 @@ export function createBackground(deps: BackgroundDeps): Background {
     setRules,
     getRules,
     getMatches: () => [...matches],
-    async seedRules(rules) {
-      const { [RULES_KEY]: stored } = await deps.storage.get(RULES_KEY);
-      if (stored === undefined) await setRules(rules);
-    },
     handleMessage(message, sendResponse) {
       if (message.type === "get-rules") {
         getRules().then(sendResponse);
@@ -56,6 +52,7 @@ export function createBackground(deps: BackgroundDeps): Background {
       if (message.type === "match") {
         matches.push(message.match);
         if (matches.length > MAX_MATCHES) matches.shift();
+        deps.onMatch?.(message.match);
       }
       return false;
     },

@@ -8,7 +8,7 @@
   "background": {
     "service_worker": "background.js"
   },
-  "permissions": ["storage"],
+  "permissions": ["storage", "alarms"],
   "host_permissions": ["http://localhost/*", "http://127.0.0.1/*"],
   "content_scripts": [
     {
