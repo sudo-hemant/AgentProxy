@@ -2,7 +2,7 @@ import type { MockRule } from "@agentproxy/shared";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import type { MatchLog } from "./match-log.js";
+import { DEFAULT_MAX_MATCHES, type MatchLog } from "./match-log.js";
 import { mockInputShape, toMockRule } from "./mock-input.js";
 import type { MockStore } from "./mock-store.js";
 import type { SetRulesResult } from "./rule-sync.js";
@@ -26,6 +26,7 @@ export interface McpServerDeps {
 export function createMcpServer({
   browser,
   store,
+  matches,
   version,
   now = Date.now,
   newId = defaultId,
@@ -89,6 +90,55 @@ export function createMcpServer({
     async ({ ids }) => {
       const { cleared, notFound } = store.clear(ids);
       return reply({ cleared, not_found: notFound, ...(await sync()) });
+    },
+  );
+
+  server.registerTool(
+    "get_matches",
+    {
+      title: "Get matches",
+      description:
+        "Show which requests were answered by which mock, to check that a mock took effect. " +
+        "Only mocked requests are listed.",
+      inputSchema: {
+        mock_id: z.string().optional().describe("Only requests answered by this mock."),
+        since: z
+          .string()
+          .optional()
+          .describe("Only requests at or after this time, as an ISO 8601 timestamp."),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(DEFAULT_MAX_MATCHES)
+          .default(50)
+          .describe("At most this many of the most recent matches. Default 50."),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ mock_id, since, limit }) => {
+      const sinceMs = since === undefined ? undefined : Date.parse(since);
+      if (Number.isNaN(sinceMs)) {
+        return reply({ error: `since is not an ISO 8601 timestamp: ${since}` }, true);
+      }
+      const found = matches.query({ ruleId: mock_id, since: sinceMs });
+      return reply({
+        total: found.length,
+        matches: found.slice(-limit).map((m) => ({
+          mock_id: m.ruleId,
+          method: m.method,
+          url: m.url,
+          transport: m.transport,
+          at: new Date(m.at).toISOString(),
+        })),
+        ...(found.length === 0
+          ? {
+              note:
+                "No requests matched. A mock applies to requests made after it was set: " +
+                "reload the page or repeat the action, and check the URL pattern with list_mocks.",
+            }
+          : {}),
+      });
     },
   );
 

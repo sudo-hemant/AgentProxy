@@ -29,12 +29,15 @@ afterEach(async () => {
 /** A real MCP client talking to the server in-process. */
 async function connect(browser = fakeBrowser().browser) {
   let ids = 0;
+  let time = NOW;
+  const now = () => time;
+  const matches = createMatchLog({ now });
   const server = createMcpServer({
     browser,
-    store: createMockStore({ now: () => NOW }),
-    matches: createMatchLog({ now: () => NOW }),
+    store: createMockStore({ now }),
+    matches,
     version: "test",
-    now: () => NOW,
+    now,
     newId: () => `mock-${++ids}`,
   });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -48,14 +51,19 @@ async function connect(browser = fakeBrowser().browser) {
     const [content] = result.content as Array<{ type: string; text: string }>;
     return { isError: result.isError === true, data: JSON.parse(content?.text ?? "null") };
   };
-  return { client, call };
+  return { client, call, matches, setTime: (t: number) => (time = t) };
 }
 
 describe("MCP server", () => {
   it("offers its tools", async () => {
     const { client } = await connect();
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name)).toEqual(["set_mock", "list_mocks", "clear_mocks"]);
+    expect(tools.map((t) => t.name)).toEqual([
+      "set_mock",
+      "list_mocks",
+      "clear_mocks",
+      "get_matches",
+    ]);
     const setMock = tools.find((t) => t.name === "set_mock");
     expect(setMock?.inputSchema.required).toEqual(["url"]);
   });
@@ -217,6 +225,72 @@ describe("MCP server", () => {
       const { data } = await call("clear_mocks");
       expect(data.applied).toBe(false);
       expect(data.note).toMatch(/No browser is connected/);
+    });
+  });
+
+  describe("get_matches", () => {
+    const report = (ruleId: string, n = 1) => ({
+      ruleId,
+      method: "GET",
+      url: `http://localhost:3000/api/${n}`,
+      transport: "fetch" as const,
+    });
+
+    it("lists matched requests with the mock that answered them", async () => {
+      const { call, matches } = await connect();
+      matches.record(report("orders"));
+      const { isError, data } = await call("get_matches");
+      expect(isError).toBe(false);
+      expect(data).toEqual({
+        total: 1,
+        matches: [
+          {
+            mock_id: "orders",
+            method: "GET",
+            url: "http://localhost:3000/api/1",
+            transport: "fetch",
+            at: new Date(NOW).toISOString(),
+          },
+        ],
+      });
+    });
+
+    it("filters by mock id and by time", async () => {
+      const { call, matches, setTime } = await connect();
+      matches.record(report("a", 1));
+      setTime(NOW + 5_000);
+      matches.record(report("b", 2));
+      matches.record(report("a", 3));
+      const since = new Date(NOW + 5_000).toISOString();
+      const { data } = await call("get_matches", { mock_id: "a", since });
+      expect(data.matches.map((m: { url: string }) => m.url)).toEqual([
+        "http://localhost:3000/api/3",
+      ]);
+    });
+
+    it("returns the most recent matches up to the limit, with the total", async () => {
+      const { call, matches } = await connect();
+      for (let n = 1; n <= 5; n++) matches.record(report("a", n));
+      const { data } = await call("get_matches", { limit: 2 });
+      expect(data.total).toBe(5);
+      expect(data.matches.map((m: { url: string }) => m.url)).toEqual([
+        "http://localhost:3000/api/4",
+        "http://localhost:3000/api/5",
+      ]);
+    });
+
+    it("explains what to check when nothing matched", async () => {
+      const { call } = await connect();
+      const { data } = await call("get_matches");
+      expect(data.total).toBe(0);
+      expect(data.note).toMatch(/reload the page/);
+    });
+
+    it("rejects a since that isn't a timestamp", async () => {
+      const { call } = await connect();
+      const { isError, data } = await call("get_matches", { since: "yesterday" });
+      expect(isError).toBe(true);
+      expect(data.error).toMatch(/since/);
     });
   });
 });
