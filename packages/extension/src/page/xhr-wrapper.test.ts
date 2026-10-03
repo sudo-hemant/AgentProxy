@@ -88,6 +88,24 @@ describe("installXhrWrapper", () => {
       expect(xhr.response).toBeNull();
     });
 
+    it("gives a Blob with the content type for responseType blob", async () => {
+      const xhr = openXhr("GET", "/api/orders", "blob");
+      await load(xhr);
+      const blob = xhr.response as Blob;
+      expect(blob).toBeInstanceOf(Blob);
+      expect(blob.type).toBe("application/json");
+      expect(await blob.text()).toBe('{"error":"boom"}');
+    });
+
+    it("gives the UTF-8 bytes for responseType arraybuffer", async () => {
+      store.setRules([{ ...ordersRule, response: { status: 200, body: "café" } }]);
+      const xhr = openXhr("GET", "/api/orders", "arraybuffer");
+      await load(xhr);
+      const buffer = xhr.response as ArrayBuffer;
+      expect(buffer.byteLength).toBe(5);
+      expect(new TextDecoder().decode(buffer)).toBe("café");
+    });
+
     it("fires readystatechange, load and loadend, through on-handlers too", async () => {
       const xhr = openXhr("GET", "/api/orders");
       const events: string[] = [];

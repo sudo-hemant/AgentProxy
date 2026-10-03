@@ -66,7 +66,7 @@ function respondWithMock(xhr: XMLHttpRequest, rule: MockRule, url: string): void
   define("status", status);
   define("statusText", "");
   define("responseURL", url);
-  define("response", responseFor(xhr.responseType, text));
+  define("response", responseFor(xhr.responseType, text, headers["content-type"] ?? ""));
   if (xhr.responseType === "" || xhr.responseType === "text") define("responseText", text);
   xhr.getResponseHeader = (name) => headers[name.toLowerCase()] ?? null;
   xhr.getAllResponseHeaders = () =>
@@ -90,13 +90,23 @@ function respondWithMock(xhr: XMLHttpRequest, rule: MockRule, url: string): void
 }
 
 /** The value of `xhr.response` for the request's `responseType`. */
-function responseFor(responseType: XMLHttpRequestResponseType, text: string): unknown {
-  if (responseType === "json") {
-    try {
-      return JSON.parse(text);
-    } catch {
-      return null; // what a browser gives for a body that isn't valid JSON
-    }
+function responseFor(
+  responseType: XMLHttpRequestResponseType,
+  text: string,
+  contentType: string,
+): unknown {
+  switch (responseType) {
+    case "json":
+      try {
+        return JSON.parse(text);
+      } catch {
+        return null; // what a browser gives for a body that isn't valid JSON
+      }
+    case "blob":
+      return new Blob([text], { type: contentType });
+    case "arraybuffer":
+      return new TextEncoder().encode(text).buffer;
+    default:
+      return text;
   }
-  return text;
 }
