@@ -12,3 +12,7 @@ spike/results/
 # Build outputs
 dist/
 *.tsbuildinfo
+
+# Playwright outputs
+test-results/
+playwright-report/
