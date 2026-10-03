@@ -3,7 +3,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, describe, expect, it } from "vitest";
 import { createMatchLog } from "./match-log.js";
-import { type BrowserLink, createMcpServer } from "./mcp.js";
+import { type BrowserLink, createMcpServer, type Listening } from "./mcp.js";
 import { createMockStore } from "./mock-store.js";
 
 const NOW = Date.UTC(2026, 9, 3, 12, 0, 0);
@@ -27,13 +27,14 @@ afterEach(async () => {
 });
 
 /** A real MCP client talking to the server in-process. */
-async function connect(browser = fakeBrowser().browser) {
+async function connect(browser = fakeBrowser().browser, listening: Listening = { port: 47821 }) {
   let ids = 0;
   let time = NOW;
   const now = () => time;
   const matches = createMatchLog({ now });
   const server = createMcpServer({
     browser,
+    listening,
     store: createMockStore({ now }),
     matches,
     version: "test",
@@ -63,6 +64,7 @@ describe("MCP server", () => {
       "list_mocks",
       "clear_mocks",
       "get_matches",
+      "status",
     ]);
     const setMock = tools.find((t) => t.name === "set_mock");
     expect(setMock?.inputSchema.required).toEqual(["url"]);
@@ -291,6 +293,42 @@ describe("MCP server", () => {
       const { isError, data } = await call("get_matches", { since: "yesterday" });
       expect(isError).toBe(true);
       expect(data.error).toMatch(/since/);
+    });
+  });
+
+  describe("status", () => {
+    it("reports a connected browser and the live mocks", async () => {
+      const { call } = await connect();
+      await call("set_mock", { url: "*/a" });
+      const { isError, data } = await call("status");
+      expect(isError).toBe(false);
+      expect(data).toEqual({
+        extension_connected: true,
+        port: 47821,
+        active_mocks: 1,
+        version: "test",
+        note: "Ready: mocks set now reach the browser.",
+      });
+    });
+
+    it("says what to open when no browser is connected", async () => {
+      const { call } = await connect(fakeBrowser({ connected: false }).browser);
+      const { data } = await call("status");
+      expect(data.extension_connected).toBe(false);
+      expect(data.note).toMatch(/open Chrome with the AgentProxy extension.*port 47821/);
+    });
+
+    it("reports why the server can't reach the browser", async () => {
+      const { call } = await connect(fakeBrowser({ connected: false }).browser, {
+        error: "port 47821 is already in use",
+      });
+      const { data } = await call("status");
+      expect(data).toMatchObject({
+        extension_connected: false,
+        error: "port 47821 is already in use",
+      });
+      expect(data.port).toBeUndefined();
+      expect(data.note).toMatch(/port 47821 is already in use/);
     });
   });
 });

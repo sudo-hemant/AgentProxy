@@ -13,8 +13,12 @@ export interface BrowserLink {
   isConnected(): boolean;
 }
 
+/** Where the bridge listens for the extension, or why it couldn't start. */
+export type Listening = { port: number } | { error: string };
+
 export interface McpServerDeps {
   browser: BrowserLink;
+  listening: Listening;
   store: MockStore;
   matches: MatchLog;
   version: string;
@@ -25,6 +29,7 @@ export interface McpServerDeps {
 /** The MCP server that gives the agent its tools. */
 export function createMcpServer({
   browser,
+  listening,
   store,
   matches,
   version,
@@ -142,7 +147,41 @@ export function createMcpServer({
     },
   );
 
+  server.registerTool(
+    "status",
+    {
+      title: "Status",
+      description:
+        "Check whether the Chrome extension is connected, so mocks can reach the browser, and " +
+        "how many mocks are in effect.",
+      annotations: { readOnlyHint: true },
+    },
+    async () => {
+      const connected = browser.isConnected();
+      return reply({
+        extension_connected: connected,
+        ...("port" in listening ? { port: listening.port } : { error: listening.error }),
+        active_mocks: store.list().length,
+        version,
+        note: statusNote(listening, connected),
+      });
+    },
+  );
+
   return server;
+}
+
+function statusNote(listening: Listening, connected: boolean): string {
+  if ("error" in listening) {
+    return `The server can't reach the browser: ${listening.error}`;
+  }
+  if (!connected) {
+    return (
+      "Waiting for the browser: open Chrome with the AgentProxy extension loaded and paired " +
+      `with this server (port ${listening.port}).`
+    );
+  }
+  return "Ready: mocks set now reach the browser.";
 }
 
 /** The agent-facing view of a mock: the same field names `set_mock` takes. */
